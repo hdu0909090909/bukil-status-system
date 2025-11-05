@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
 
-// 🔴 이 두 줄이 핵심: 이 페이지는 미리 렌더하지 말고 매번 만들어라
+// 빌드할 때 미리 만들지 말고 요청 올 때마다 만들라고 강제
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 
@@ -23,8 +22,6 @@ const STATUS_LIST = [
   "기타",
 ] as const;
 
-type Status = (typeof STATUS_LIST)[number];
-
 type Student = {
   id: string;
   name: string;
@@ -35,20 +32,22 @@ type Student = {
 };
 
 export default function StudentPage() {
-  const searchParams = useSearchParams();
   const [studentId, setStudentId] = useState<string | null>(null);
-
   const [me, setMe] = useState<Student | null>(null);
-  const [status, setStatus] = useState<string>("재실");
+  const [status, setStatus] = useState("재실");
   const [reason, setReason] = useState("");
 
-  // URL 파라미터는 렌더 후에 읽기
+  // 1) 클라이언트에서만 URL 쿼리 읽기
   useEffect(() => {
-    const id = searchParams.get("id");
-    if (id) setStudentId(id);
-  }, [searchParams]);
+    if (typeof window === "undefined") return;
+    const qs = new URLSearchParams(window.location.search);
+    const id = qs.get("id");
+    if (id) {
+      setStudentId(id);
+    }
+  }, []);
 
-  // 학생 정보 불러오기
+  // 2) id 알게 되면 학생 정보 불러오기
   useEffect(() => {
     const load = async () => {
       if (!studentId) return;
@@ -94,6 +93,7 @@ export default function StudentPage() {
       <h1 className="text-2xl font-bold mb-6">
         {me.name} ({me.id})
       </h1>
+
       <div className="max-w-sm space-y-4">
         <div>
           <label className="block text-sm font-semibold mb-1">상태</label>
@@ -109,6 +109,7 @@ export default function StudentPage() {
             ))}
           </select>
         </div>
+
         <div>
           <label className="block text-sm font-semibold mb-1">사유</label>
           <input
@@ -118,6 +119,7 @@ export default function StudentPage() {
             placeholder="사유 입력"
           />
         </div>
+
         <button
           onClick={handleSave}
           className="bg-blue-500 text-white px-4 py-2 rounded text-sm"
