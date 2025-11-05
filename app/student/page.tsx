@@ -3,6 +3,10 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
+// 🔴 이 두 줄이 핵심: 이 페이지는 미리 렌더하지 말고 매번 만들어라
+export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
+
 const STATUS_LIST = [
   "재실",
   "미디어스페이스",
@@ -32,24 +36,19 @@ type Student = {
 
 export default function StudentPage() {
   const searchParams = useSearchParams();
-
-  // URL에서 가져온 학번을 여기다 넣자
   const [studentId, setStudentId] = useState<string | null>(null);
 
-  // 실제 학생 데이터
   const [me, setMe] = useState<Student | null>(null);
   const [status, setStatus] = useState<string>("재실");
   const [reason, setReason] = useState("");
 
-  // 1) 먼저 URL 파라미터를 effect로 꺼내기
+  // URL 파라미터는 렌더 후에 읽기
   useEffect(() => {
     const id = searchParams.get("id");
-    if (id) {
-      setStudentId(id);
-    }
+    if (id) setStudentId(id);
   }, [searchParams]);
 
-  // 2) 학번을 알아낸 다음에야 학생 정보를 불러오기
+  // 학생 정보 불러오기
   useEffect(() => {
     const load = async () => {
       if (!studentId) return;
