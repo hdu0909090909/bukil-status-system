@@ -32,12 +32,24 @@ type Student = {
 
 export default function StudentPage() {
   const searchParams = useSearchParams();
-  const studentId = searchParams.get("id");
 
+  // URL에서 가져온 학번을 여기다 넣자
+  const [studentId, setStudentId] = useState<string | null>(null);
+
+  // 실제 학생 데이터
   const [me, setMe] = useState<Student | null>(null);
   const [status, setStatus] = useState<string>("재실");
   const [reason, setReason] = useState("");
 
+  // 1) 먼저 URL 파라미터를 effect로 꺼내기
+  useEffect(() => {
+    const id = searchParams.get("id");
+    if (id) {
+      setStudentId(id);
+    }
+  }, [searchParams]);
+
+  // 2) 학번을 알아낸 다음에야 학생 정보를 불러오기
   useEffect(() => {
     const load = async () => {
       if (!studentId) return;
@@ -54,7 +66,11 @@ export default function StudentPage() {
   }, [studentId]);
 
   if (!studentId) {
-    return <div className="p-6">잘못된 접근입니다. 처음 페이지에서 로그인해주세요.</div>;
+    return (
+      <div className="p-6">
+        잘못된 접근입니다. 처음 페이지에서 로그인해주세요.
+      </div>
+    );
   }
 
   if (!me) {
