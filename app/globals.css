@@ -3,6 +3,13 @@
 @tailwind components;
 @tailwind utilities;
 
+@media (prefers-color-scheme: dark) {
+  html {
+    color-scheme: light;
+  }
+}
+
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
