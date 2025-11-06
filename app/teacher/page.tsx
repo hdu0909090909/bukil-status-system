@@ -1,3 +1,4 @@
+// app/teacher/teacher-inner.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -400,15 +401,18 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
   const [loading, setLoading] = useState(false);
 
   const sortById = (
-    list: Array<{ studentId: string; name: string; status: string; reason: string }>
+    list: Array<{
+      studentId: string;
+      name: string;
+      status: string;
+      reason: string;
+    }>
   ) => [...list].sort((a, b) => a.studentId.localeCompare(b.studentId));
 
-  // 요일/시간 바뀌면: 1) 스케줄 먼저, 2) 없으면 학생 목록으로 채움
+  // 요일/시간 바뀌면: 먼저 스케줄, 없으면 학생 목록
   useEffect(() => {
     const load = async () => {
       setLoading(true);
-
-      // 1. 해당 요일/시간 스케줄 가져오기
       const res = await fetch(
         `/api/scheduler?day=${day}&slot=${encodeURIComponent(slot)}`
       );
@@ -421,7 +425,6 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
           status: string;
           reason: string;
         }>;
-
         if (items.length > 0) {
           setRows(sortById(items));
           setLoading(false);
@@ -429,7 +432,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
         }
       }
 
-      // 2. 스케줄이 없으면 현재 학생 목록으로 만들어서 보여줌
+      // 없으면 학생 목록으로
       const res2 = await fetch("/api/students");
       if (res2.ok) {
         const students: Student[] = await res2.json();
@@ -448,11 +451,9 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
 
       setLoading(false);
     };
-
     load();
   }, [day, slot]);
 
-  // 현재 상태로 채우기
   const fillFromCurrent = async () => {
     const res = await fetch("/api/students");
     const students: Student[] = await res.json();
@@ -467,14 +468,12 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
     setRows(items);
   };
 
-  // 전체 변경안함
   const setAllNoChange = () => {
     setRows((prev) =>
       prev.map((r) => ({ ...r, status: "변경안함", reason: "" }))
     );
   };
 
-  // 저장
   const saveRows = async () => {
     await fetch("/api/scheduler", {
       method: "POST",
@@ -484,7 +483,6 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
     alert("스케줄을 저장했습니다.");
   };
 
-  // 적용
   const applyTemplate = async () => {
     const res = await fetch("/api/scheduler/apply", {
       method: "POST",

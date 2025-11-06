@@ -1,3 +1,4 @@
+// app/student/student-inner.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -66,9 +67,7 @@ export default function StudentPage() {
   }
 
   if (!me) {
-    return (
-      <div className="p-6 text-center text-gray-500">불러오는 중...</div>
-    );
+    return <div className="p-6 text-center text-gray-500">불러오는 중...</div>;
   }
 
   const handleSave = async () => {
@@ -84,7 +83,7 @@ export default function StudentPage() {
     alert("저장되었습니다.");
   };
 
-  // 🔑 여기서 기존 change-password 페이지로 보내기
+  // 비밀번호 변경 페이지로
   const goToChangePassword = () => {
     router.push(`/change-password?role=student&id=${me.id}`);
   };
@@ -150,7 +149,6 @@ export default function StudentPage() {
               저장
             </button>
 
-            {/* 여기 버튼만 추가 */}
             <button
               onClick={goToChangePassword}
               className="w-full border border-gray-200 text-gray-700 py-2 rounded-md text-sm font-semibold mt-2 hover:bg-gray-50"
