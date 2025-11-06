@@ -1,4 +1,4 @@
-// app/teacher/teacher-inner.tsx
+// app/teacher/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -54,53 +54,74 @@ export default function TeacherPage() {
   const [tab, setTab] = useState<"status" | "schedule">("status");
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
+  // 🔴 지금 뭔가 수정 중인지 표시
+  const [isMutating, setIsMutating] = useState(false);
+
+  const fetchStudents = async () => {
+    const res = await fetch("/api/students");
+    const data: Student[] = await res.json();
+    data.sort((a, b) => a.id.localeCompare(b.id));
+    setStudents(data);
+  };
 
   // 첫 로드
   useEffect(() => {
     const load = async () => {
-      const res = await fetch("/api/students");
-      const data: Student[] = await res.json();
-      data.sort((a, b) => a.id.localeCompare(b.id));
-      setStudents(data);
+      await fetchStudents();
       setLoading(false);
     };
     load();
   }, []);
 
-  // 상태 탭일 때만 1초 폴링
+  // 상태 탭일 때만 폴링하고, 수정 중일 때는 잠깐 스킵
   useEffect(() => {
     if (tab !== "status") return;
     let stop = false;
+
     const tick = async () => {
+      if (stop) return;
+      if (isMutating) return; // 🔴 수정 중이면 덮어쓰기 금지
       const res = await fetch("/api/students");
       if (!res.ok) return;
       const data: Student[] = await res.json();
       data.sort((a, b) => a.id.localeCompare(b.id));
       if (!stop) setStudents(data);
     };
+
     tick();
-    const t = setInterval(tick, 1000);
+    const t = setInterval(tick, 1500);
     return () => {
       stop = true;
       clearInterval(t);
     };
-  }, [tab]);
+  }, [tab, isMutating]);
 
+  // 개별 저장
   const saveStudent = async (id: string, updates: Partial<Student>) => {
+    setIsMutating(true);
+    // 화면 먼저 반영
     setStudents((prev) =>
       prev.map((s) => (s.id === id ? { ...s, ...updates } : s))
     );
+    // 서버에 저장
     await fetch("/api/students", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, ...updates }),
     });
+    // 서버 값으로 한 번 맞춰줌
+    await fetchStudents();
+    setIsMutating(false);
   };
 
   // 일괄 재실
   const resetAllToPresent = async () => {
-    const next = students.map((s) => ({ ...s, status: "재실", reason: "" }));
-    setStudents(next);
+    setIsMutating(true);
+    // 화면 먼저 바꾸기
+    setStudents((prev) =>
+      prev.map((s) => ({ ...s, status: "재실", reason: "" }))
+    );
+    // 서버로 일괄 PATCH
     await Promise.all(
       students.map((s) =>
         fetch("/api/students", {
@@ -110,11 +131,15 @@ export default function TeacherPage() {
         })
       )
     );
+    // 끝나고 서버 걸로 동기화
+    await fetchStudents();
+    setIsMutating(false);
   };
+
   // 일괄 허가
   const approveAll = async () => {
-    const next = students.map((s) => ({ ...s, approved: true }));
-    setStudents(next);
+    setIsMutating(true);
+    setStudents((prev) => prev.map((s) => ({ ...s, approved: true })));
     await Promise.all(
       students.map((s) =>
         fetch("/api/students", {
@@ -124,11 +149,14 @@ export default function TeacherPage() {
         })
       )
     );
+    await fetchStudents();
+    setIsMutating(false);
   };
+
   // 일괄 불허가
   const disapproveAll = async () => {
-    const next = students.map((s) => ({ ...s, approved: false }));
-    setStudents(next);
+    setIsMutating(true);
+    setStudents((prev) => prev.map((s) => ({ ...s, approved: false })));
     await Promise.all(
       students.map((s) =>
         fetch("/api/students", {
@@ -138,13 +166,15 @@ export default function TeacherPage() {
         })
       )
     );
+    await fetchStudents();
+    setIsMutating(false);
   };
 
   const handleLogout = () => {
     router.push("/");
   };
 
-  // 인원 카드 계산
+  // 인원 카드
   const total = students.length;
   const inClassOrMedia = students.filter(
     (s) => s.status === "재실" || s.status === "미디어스페이스"
@@ -158,12 +188,8 @@ export default function TeacherPage() {
   }).length;
   const outCampus = total - inCampus;
 
-  // 스케줄 적용 뒤 바로 상태 새로고침
   const refreshNow = async () => {
-    const res = await fetch("/api/students");
-    const data: Student[] = await res.json();
-    data.sort((a, b) => a.id.localeCompare(b.id));
-    setStudents(data);
+    await fetchStudents();
   };
 
   return (
@@ -179,7 +205,9 @@ export default function TeacherPage() {
               <button
                 onClick={() => setTab("status")}
                 className={`px-4 py-2 text-sm font-semibold ${
-                  tab === "status" ? "bg-[#1f6fe5] text-white" : "text-gray-700"
+                  tab === "status"
+                    ? "bg-[#1f6fe5] text-white"
+                    : "text-gray-700"
                 }`}
               >
                 학생 상태
@@ -256,9 +284,15 @@ export default function TeacherPage() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-100 sticky top-0 z-10">
                     <tr>
-                      <th className="px-2 py-2 w-20 text-left border-b">학번</th>
-                      <th className="px-2 py-2 w-28 text-left border-b">이름</th>
-                      <th className="px-2 py-2 w-40 text-left border-b">상태</th>
+                      <th className="px-2 py-2 w-20 text-left border-b">
+                        학번
+                      </th>
+                      <th className="px-2 py-2 w-28 text-left border-b">
+                        이름
+                      </th>
+                      <th className="px-2 py-2 w-40 text-left border-b">
+                        상태
+                      </th>
                       <th className="px-2 py-2 text-left border-b">사유</th>
                       <th className="px-2 py-2 w-16 text-left border-b">
                         허가
@@ -401,22 +435,16 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
   const [loading, setLoading] = useState(false);
 
   const sortById = (
-    list: Array<{
-      studentId: string;
-      name: string;
-      status: string;
-      reason: string;
-    }>
+    list: Array<{ studentId: string; name: string; status: string; reason: string }>
   ) => [...list].sort((a, b) => a.studentId.localeCompare(b.studentId));
 
-  // 요일/시간 바뀌면: 먼저 스케줄, 없으면 학생 목록
+  // 요일/시간 바뀌면 목록 가져오기
   useEffect(() => {
     const load = async () => {
       setLoading(true);
       const res = await fetch(
         `/api/scheduler?day=${day}&slot=${encodeURIComponent(slot)}`
       );
-
       if (res.ok) {
         const data = await res.json();
         const items = (data.items ?? []) as Array<{
@@ -432,7 +460,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
         }
       }
 
-      // 없으면 학생 목록으로
+      // 스케줄 없으면 현재 학생들로 채우기
       const res2 = await fetch("/api/students");
       if (res2.ok) {
         const students: Student[] = await res2.json();
@@ -448,7 +476,6 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
       } else {
         setRows([]);
       }
-
       setLoading(false);
     };
     load();
