@@ -390,7 +390,7 @@ export default function DisplayPage() {
             {/* 오른쪽: 미디어/귀가 + 인원 */}
             <div className="flex-1 flex gap-3 min-h-0 h-[420px]">
               {/* 왼쪽 세로: 미디어 + 귀가 */}
-              <div className="w-[360px] flex flex-col gap-3 h-full min-h-0">
+              <div className="w-[280px] flex flex-col gap-3 h-full min-h-0">
                 {/* 미디어스페이스 */}
                 <div className="border-2 border-black flex-1 flex flex-col min-h-0">
                   <div className="text-center font-bold py-1 border-b border-black bg-white">
