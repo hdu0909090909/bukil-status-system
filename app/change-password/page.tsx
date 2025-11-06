@@ -1,9 +1,19 @@
+// app/change-password/page.tsx
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-export default function ChangePasswordPage() {
+export default function ChangePasswordPageOuter() {
+  // Vercel이 요구하는 Suspense 래핑
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">로딩중...</div>}>
+      <ChangePasswordPageInner />
+    </Suspense>
+  );
+}
+
+function ChangePasswordPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -63,7 +73,6 @@ export default function ChangePasswordPage() {
       }
 
       setOkMsg("비밀번호가 변경되었습니다. 다시 로그인해주세요.");
-      // 원하면 1~2초 뒤에 로그인 페이지로
       setTimeout(() => {
         router.push("/");
       }, 1500);
@@ -145,12 +154,12 @@ export default function ChangePasswordPage() {
             />
             {tab === "student" && (
               <p className="text-[11px] text-gray-400 mt-1">
-                ※초기 비밀번호: 12345678
+                (기본값이 12345678 이라면 그걸 넣으세요)
               </p>
             )}
             {tab === "teacher" && (
               <p className="text-[11px] text-gray-400 mt-1">
-                
+                (지금은 admin 으로 되어 있을 거예요)
               </p>
             )}
           </div>
