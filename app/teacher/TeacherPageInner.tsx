@@ -1,7 +1,6 @@
-// app/teacher/page.tsx
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 /* 공통 상태 목록 */
@@ -55,36 +54,32 @@ export default function TeacherPage() {
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // 지금 수정 중인지
-  const [isMutating, setIsMutating] = useState(false);
-  // 어떤 수정이 마지막 수정인지 표시
-  const mutateCounterRef = useRef(0);
-
-  const fetchStudents = async () => {
-    const res = await fetch("/api/students");
-    const data: Student[] = await res.json();
-    data.sort((a, b) => a.id.localeCompare(b.id));
-    setStudents(data);
-  };
+  // 🔐 이 시간까지는 서버에서 오는 데이터로 덮어쓰지 말자
+  const [syncPausedUntil, setSyncPausedUntil] = useState<number>(0);
 
   // 첫 로드
   useEffect(() => {
-    (async () => {
-      await fetchStudents();
+    const load = async () => {
+      const res = await fetch("/api/students", { cache: "no-store" });
+      const data: Student[] = await res.json();
+      data.sort((a, b) => a.id.localeCompare(b.id));
+      setStudents(data);
       setLoading(false);
-    })();
+    };
+    load();
   }, []);
 
-  // 상태 탭일 때만 폴링 + 수정 중일 때는 덮어쓰기 금지
+  // 상태 탭일 때만 폴링 (1초). 근데 syncPausedUntil 동안은 덮어쓰지 않음
   useEffect(() => {
     if (tab !== "status") return;
     let stop = false;
 
     const tick = async () => {
-      if (stop) return;
-      if (isMutating) return; // 내가 손대는 중이면 서버 데이터로 덮어쓰지 말자
+      const now = Date.now();
+      // 5초 쿨타임 중이면 그냥 스킵
+      if (now < syncPausedUntil) return;
 
-      const res = await fetch("/api/students");
+      const res = await fetch("/api/students", { cache: "no-store" });
       if (!res.ok) return;
       const data: Student[] = await res.json();
       data.sort((a, b) => a.id.localeCompare(b.id));
@@ -92,52 +87,40 @@ export default function TeacherPage() {
     };
 
     tick();
-    const t = setInterval(tick, 1500);
-
+    const t = setInterval(tick, 1000);
     return () => {
       stop = true;
       clearInterval(t);
     };
-  }, [tab, isMutating]);
+  }, [tab, syncPausedUntil]);
 
-  // 개별 저장
   const saveStudent = async (id: string, updates: Partial<Student>) => {
-    setIsMutating(true);
-    const myTurn = ++mutateCounterRef.current;
-
-    // 화면에 먼저 반영
+    // 로컬 먼저 반영
     setStudents((prev) =>
       prev.map((s) => (s.id === id ? { ...s, ...updates } : s))
     );
-
+    // 서버에도 전송
     await fetch("/api/students", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, ...updates }),
     });
+  };
 
-    // 내가 마지막 수정이 맞을 때만 mutating 풀기
-    if (mutateCounterRef.current === myTurn) {
-      // 바로 풀면 폴링이 너무 빨리 덮어쓰므로 살짝 딜레이
-      setTimeout(() => {
-        // 이때도 여전히 내가 마지막이면 풀기
-        if (mutateCounterRef.current === myTurn) {
-          setIsMutating(false);
-        }
-      }, 400);
-    }
+  // 5초 동안 동기화 멈추기
+  const pauseSyncFor = (ms: number) => {
+    setSyncPausedUntil(Date.now() + ms);
   };
 
   // 일괄 재실
   const resetAllToPresent = async () => {
-    setIsMutating(true);
-    const myTurn = ++mutateCounterRef.current;
+    // 먼저 화면에서 전부 반영
+    const next = students.map((s) => ({ ...s, status: "재실", reason: "" }));
+    setStudents(next);
+    // 5초간 서버 데이터 무시
+    pauseSyncFor(5000);
 
-    // 화면 먼저
-    setStudents((prev) =>
-      prev.map((s) => ({ ...s, status: "재실", reason: "" }))
-    );
-
+    // 서버에도 전부 보내기
     await Promise.all(
       students.map((s) =>
         fetch("/api/students", {
@@ -147,22 +130,13 @@ export default function TeacherPage() {
         })
       )
     );
-
-    if (mutateCounterRef.current === myTurn) {
-      setTimeout(() => {
-        if (mutateCounterRef.current === myTurn) {
-          setIsMutating(false);
-        }
-      }, 400);
-    }
   };
 
   // 일괄 허가
   const approveAll = async () => {
-    setIsMutating(true);
-    const myTurn = ++mutateCounterRef.current;
-
-    setStudents((prev) => prev.map((s) => ({ ...s, approved: true })));
+    const next = students.map((s) => ({ ...s, approved: true }));
+    setStudents(next);
+    pauseSyncFor(5000);
 
     await Promise.all(
       students.map((s) =>
@@ -173,22 +147,13 @@ export default function TeacherPage() {
         })
       )
     );
-
-    if (mutateCounterRef.current === myTurn) {
-      setTimeout(() => {
-        if (mutateCounterRef.current === myTurn) {
-          setIsMutating(false);
-        }
-      }, 400);
-    }
   };
 
   // 일괄 불허가
   const disapproveAll = async () => {
-    setIsMutating(true);
-    const myTurn = ++mutateCounterRef.current;
-
-    setStudents((prev) => prev.map((s) => ({ ...s, approved: false })));
+    const next = students.map((s) => ({ ...s, approved: false }));
+    setStudents(next);
+    pauseSyncFor(5000);
 
     await Promise.all(
       students.map((s) =>
@@ -199,14 +164,6 @@ export default function TeacherPage() {
         })
       )
     );
-
-    if (mutateCounterRef.current === myTurn) {
-      setTimeout(() => {
-        if (mutateCounterRef.current === myTurn) {
-          setIsMutating(false);
-        }
-      }, 400);
-    }
   };
 
   const handleLogout = () => {
@@ -227,10 +184,13 @@ export default function TeacherPage() {
   }).length;
   const outCampus = total - inCampus;
 
-  // 스케줄 적용 후 새로고침용
+  // 스케줄 적용 뒤 강제 새로고침할 때도 쿨타임 살짝 주자
   const refreshNow = async () => {
-    // 스케줄 적용은 서버쪽에서 한 번에 바꾸니까 이때는 바로 다시 불러와도 됨
-    await fetchStudents();
+    const res = await fetch("/api/students", { cache: "no-store" });
+    const data: Student[] = await res.json();
+    data.sort((a, b) => a.id.localeCompare(b.id));
+    setStudents(data);
+    pauseSyncFor(2000);
   };
 
   return (
@@ -327,7 +287,9 @@ export default function TeacherPage() {
                       <th className="px-2 py-2 w-28 text-left border-b">이름</th>
                       <th className="px-2 py-2 w-40 text-left border-b">상태</th>
                       <th className="px-2 py-2 text-left border-b">사유</th>
-                      <th className="px-2 py-2 w-16 text-left border-b">허가</th>
+                      <th className="px-2 py-2 w-16 text-left border-b">
+                        허가
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -469,6 +431,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
     list: Array<{ studentId: string; name: string; status: string; reason: string }>
   ) => [...list].sort((a, b) => a.studentId.localeCompare(b.studentId));
 
+  // 요일/시간 바뀌면: 스케줄 → 없으면 학생 리스트로
   useEffect(() => {
     const load = async () => {
       setLoading(true);
@@ -476,7 +439,6 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
       const res = await fetch(
         `/api/scheduler?day=${day}&slot=${encodeURIComponent(slot)}`
       );
-
       if (res.ok) {
         const data = await res.json();
         const items = (data.items ?? []) as Array<{
@@ -485,7 +447,6 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
           status: string;
           reason: string;
         }>;
-
         if (items.length > 0) {
           setRows(sortById(items));
           setLoading(false);
@@ -597,6 +558,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
             </button>
           ))}
         </div>
+
         <div className="ml-auto flex gap-2">
           <button
             onClick={setAllNoChange}
