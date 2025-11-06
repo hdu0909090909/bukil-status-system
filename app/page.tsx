@@ -13,38 +13,74 @@ export default function LoginPage() {
   const [tvKey, setTvKey] = useState("");
   const [error, setError] = useState("");
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
+    // ------------------ 학생 로그인 ------------------
     if (tab === "student") {
       if (!studentId.trim()) {
         setError("학번 / 아이디를 입력하세요.");
         return;
       }
-      if (studentPw !== "12345678") {
-        setError("비밀번호가 올바르지 않습니다. (초기 비밀번호: 12345678)");
+
+      // ✅ 여기서 API로 검증
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          role: "student",
+          id: studentId.trim(),
+          password: studentPw,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.ok) {
+        setError(data.message || "로그인에 실패했습니다.");
         return;
       }
-      router.push(`/student?id=${studentId.trim()}`);
+
+      router.push(`/student?id=${data.id}`);
       return;
     }
 
+    // ------------------ 교원 로그인 ------------------
     if (tab === "teacher") {
-      if (teacherId.trim() !== "윤인하" || teacherPw !== "admin") {
-        setError("교원 아이디 또는 비밀번호가 틀렸습니다.");
+      if (!teacherId.trim()) {
+        setError("교원 아이디를 입력하세요.");
         return;
       }
-      router.push("/teacher");
+
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          role: "teacher",
+          id: teacherId.trim(),
+          password: teacherPw,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.ok) {
+        setError(data.message || "로그인에 실패했습니다.");
+        return;
+      }
+
+      // ✅ teacher/page.tsx는 지금도 ?user=... 로 받으니까 그대로 맞춰줌
+      router.push(`/teacher?user=${encodeURIComponent(data.id)}`);
       return;
     }
 
+    // ------------------ TV 로그인 ------------------
     if (tab === "tv") {
       if (tvKey.trim() !== "TV-ROOM-111") {
         setError("TV 키가 올바르지 않습니다. (예: TV-ROOM-111)");
         return;
       }
-      // 필요하면 ?room=TV-ROOM-111 이런 식으로 넘겨도 됨
       router.push("/display");
       return;
     }
@@ -124,7 +160,7 @@ export default function LoginPage() {
             </>
           )}
 
-          {/* 교사 입력칸 */}
+          {/* 교원 입력칸 */}
           {tab === "teacher" && (
             <>
               <div>
