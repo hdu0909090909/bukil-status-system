@@ -154,12 +154,12 @@ function ChangePasswordPageInner() {
             />
             {tab === "student" && (
               <p className="text-[11px] text-gray-400 mt-1">
-                (기본값이 12345678 이라면 그걸 넣으세요)
+                (※초기 비밀번호: 12345678)
               </p>
             )}
             {tab === "teacher" && (
               <p className="text-[11px] text-gray-400 mt-1">
-                (지금은 admin 으로 되어 있을 거예요)
+                뀨?
               </p>
             )}
           </div>
