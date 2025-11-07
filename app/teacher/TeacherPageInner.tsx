@@ -81,7 +81,7 @@ export default function TeacherPage() {
       if (!stop) setStudents(data);
     };
     tick();
-    const t = setInterval(tick, 5000);
+    const t = setInterval(tick, 3000);
     return () => {
       stop = true;
       clearInterval(t);

@@ -1,34 +1,43 @@
 // app/lib/redis.ts
-import { Redis } from "@upstash/redis";
+const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL!;
+const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN!;
 
-// 환경변수 있는지 먼저 본다
-const hasRedis =
-  !!process.env.UPSTASH_REDIS_REST_URL &&
-  !!process.env.UPSTASH_REDIS_REST_TOKEN;
+// Upstash REST로 간단히 GET/SET 하는 유틸
+export async function redisGet<T = unknown>(key: string): Promise<T | null> {
+  if (!REDIS_URL || !REDIS_TOKEN) {
+    // env 없으면 null
+    return null;
+  }
 
-// 메모리 폴백을 글로벌에 박아두자 (dev에서 리로드돼도 유지)
-const g = globalThis as unknown as {
-  __memoryRedis?: Map<string, any>;
-};
+  const res = await fetch(`${REDIS_URL}/get/${key}`, {
+    headers: {
+      Authorization: `Bearer ${REDIS_TOKEN}`,
+    },
+    cache: "no-store",
+  });
 
-if (!g.__memoryRedis) {
-  g.__memoryRedis = new Map();
+  if (!res.ok) return null;
+  const data = await res.json();
+  // Upstash get은 { result: "string" } 이런 식이라 한번 까야 함
+  if (!data.result) return null;
+  try {
+    return JSON.parse(data.result) as T;
+  } catch {
+    return data.result as T;
+  }
 }
 
-const memory = g.__memoryRedis;
+export async function redisSet(key: string, value: unknown) {
+  if (!REDIS_URL || !REDIS_TOKEN) {
+    return;
+  }
 
-export const redis = hasRedis
-  ? new Redis({
-      url: process.env.UPSTASH_REDIS_REST_URL!,
-      token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-    })
-  : {
-      // upstash랑 인터페이스 비슷하게
-      async get(key: string) {
-        return memory.get(key) ?? null;
-      },
-      async set(key: string, value: any) {
-        memory.set(key, value);
-        return "OK";
-      },
-    };
+  await fetch(`${REDIS_URL}/set/${key}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${REDIS_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(value),
+  });
+}
