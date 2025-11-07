@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-/* 공통 상태 목록 */
+// 공통 상태 목록
 const STATUS_LIST = [
   "재실",
   "미디어스페이스",
@@ -54,10 +54,10 @@ export default function TeacherPage() {
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // 이게 true면 폴링 잠깐 멈춤
+  // 일시 폴링 정지용 ref
   const pausePollingRef = useRef(false);
 
-  // 맨 처음 한 번
+  // 첫 로드
   useEffect(() => {
     const load = async () => {
       const res = await fetch("/api/students");
@@ -69,13 +69,13 @@ export default function TeacherPage() {
     load();
   }, []);
 
-  // 상태 탭일 때만 폴링 + pausePollingRef가 false일 때만
+  // 폴링 (2초 주기)
   useEffect(() => {
     if (tab !== "status") return;
     let stop = false;
 
     const tick = async () => {
-      if (pausePollingRef.current) return; // 잠깐 멈춘 상태면 안 불러옴
+      if (pausePollingRef.current) return;
       const res = await fetch("/api/students", { cache: "no-store" });
       if (!res.ok) return;
       const data: Student[] = await res.json();
@@ -83,19 +83,16 @@ export default function TeacherPage() {
       if (!stop) setStudents(data);
     };
 
-    // 처음 한번
     tick();
-    // 2초마다로 조금만 느리게
     const t = setInterval(tick, 2000);
-
     return () => {
       stop = true;
       clearInterval(t);
     };
   }, [tab]);
 
+  // 개별 저장
   const saveStudent = async (id: string, updates: Partial<Student>) => {
-    // 낙관적 업데이트
     setStudents((prev) =>
       prev.map((s) => (s.id === id ? { ...s, ...updates } : s))
     );
@@ -106,75 +103,70 @@ export default function TeacherPage() {
     });
   };
 
-  // 일괄 재실
+  // ✅ 일괄 재실
   const resetAllToPresent = async () => {
     pausePollingRef.current = true;
     const next = students.map((s) => ({ ...s, status: "재실", reason: "" }));
     setStudents(next);
 
-    await Promise.all(
-      students.map((s) =>
-        fetch("/api/students", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: s.id, status: "재실", reason: "" }),
-        })
-      )
-    );
+    await fetch("/api/students/bulk", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        updates: students.map((s) => ({
+          id: s.id,
+          status: "재실",
+          reason: "",
+        })),
+      }),
+    });
 
-    // 4초 뒤 다시 폴링 허용
     setTimeout(() => {
       pausePollingRef.current = false;
     }, 4000);
   };
 
-  // 일괄 허가
+  // ✅ 일괄 허가
   const approveAll = async () => {
     pausePollingRef.current = true;
     const next = students.map((s) => ({ ...s, approved: true }));
     setStudents(next);
 
-    await Promise.all(
-      students.map((s) =>
-        fetch("/api/students", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: s.id, approved: true }),
-        })
-      )
-    );
+    await fetch("/api/students/bulk", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        updates: students.map((s) => ({ id: s.id, approved: true })),
+      }),
+    });
 
     setTimeout(() => {
       pausePollingRef.current = false;
     }, 4000);
   };
 
-  // 일괄 불허가
+  // ✅ 일괄 불허가
   const disapproveAll = async () => {
     pausePollingRef.current = true;
     const next = students.map((s) => ({ ...s, approved: false }));
     setStudents(next);
 
-    await Promise.all(
-      students.map((s) =>
-        fetch("/api/students", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: s.id, approved: false }),
-        })
-      )
-    );
+    await fetch("/api/students/bulk", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        updates: students.map((s) => ({ id: s.id, approved: false })),
+      }),
+    });
 
     setTimeout(() => {
       pausePollingRef.current = false;
     }, 4000);
   };
 
-  const handleLogout = () => {
-    router.push("/");
-  };
+  const handleLogout = () => router.push("/");
 
-  // 인원 카드 계산
+  // 인원 계산
   const total = students.length;
   const inClassOrMedia = students.filter(
     (s) => s.status === "재실" || s.status === "미디어스페이스"
@@ -182,13 +174,11 @@ export default function TeacherPage() {
   const outClassOrMedia = total - inClassOrMedia;
 
   const inCampus = students.filter((s) => {
-    if (s.status === "귀가" || s.status === "외출") return false;
-    if (s.status === "호실자습") return false;
+    if (["귀가", "외출", "호실자습"].includes(s.status)) return false;
     return true;
   }).length;
   const outCampus = total - inCampus;
 
-  // 스케줄 적용 후 새로고침 함수 그대로 둘게
   const refreshNow = async () => {
     const res = await fetch("/api/students", { cache: "no-store" });
     if (!res.ok) return;
@@ -293,9 +283,7 @@ export default function TeacherPage() {
                       <th className="px-2 py-2 w-28 text-left border-b">이름</th>
                       <th className="px-2 py-2 w-40 text-left border-b">상태</th>
                       <th className="px-2 py-2 text-left border-b">사유</th>
-                      <th className="px-2 py-2 w-16 text-left border-b">
-                        허가
-                      </th>
+                      <th className="px-2 py-2 w-16 text-left border-b">허가</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -342,7 +330,7 @@ export default function TeacherPage() {
                                 saveStudent(s.id, { reason: e.target.value })
                               }
                               className="border rounded px-1 py-[2px] text-sm w-full bg-white"
-                              placeholder="여기에 사유 입력"
+                              placeholder="사유 입력"
                             />
                           </td>
                           <td className="px-2 py-1">
@@ -371,7 +359,7 @@ export default function TeacherPage() {
             <div className="flex gap-4">
               <div className="bg-white rounded-md shadow-sm px-4 py-4 flex-1 flex flex-col gap-2">
                 <div className="text-sm font-semibold mb-1">
-                  인원(교실, 미디어스페이스)
+                  인원(교실·미디어스페이스)
                 </div>
                 <div className="flex justify-between text-sm">
                   <span>총원</span>
@@ -393,7 +381,7 @@ export default function TeacherPage() {
 
               <div className="bg-white rounded-md shadow-sm px-4 py-4 flex-1 flex flex-col gap-2">
                 <div className="text-sm font-semibold mb-1">
-                  인원(교내에 있는 학생)
+                  인원(교내 체류 기준)
                 </div>
                 <div className="flex justify-between text-sm">
                   <span>총원</span>
@@ -422,9 +410,7 @@ export default function TeacherPage() {
   );
 }
 
-/* ──────────────────────────────── */
-/* 스케줄러 탭 */
-/* ──────────────────────────────── */
+/* ─────────────── 스케줄러 탭 그대로 ─────────────── */
 function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
   const [day, setDay] = useState<DayKey>("mon");
   const [slot, setSlot] = useState<TimeSlot>("8교시");
@@ -439,7 +425,6 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
   useEffect(() => {
     const load = async () => {
       setLoading(true);
-      // 스케줄 먼저
       const res = await fetch(
         `/api/scheduler?day=${day}&slot=${encodeURIComponent(slot)}`
       );
@@ -452,7 +437,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
           return;
         }
       }
-      // 없으면 학생 목록으로
+
       const res2 = await fetch("/api/students");
       if (res2.ok) {
         const students: Student[] = await res2.json();
@@ -497,7 +482,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ day, slot, items: rows }),
     });
-    alert("스케줄을 저장했습니다.");
+    alert("스케줄 저장 완료");
   };
 
   const applyTemplate = async () => {
@@ -507,14 +492,12 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
       body: JSON.stringify({ day, slot }),
     });
     if (res.ok) {
-      alert("이 스케줄을 적용했습니다.");
+      alert("스케줄 적용 완료");
       onApplied?.();
-    } else {
-      alert("스케줄 적용에 실패했습니다.");
-    }
+    } else alert("스케줄 적용 실패");
   };
 
-  const updateRow = (
+    const updateRow = (
     studentId: string,
     part: Partial<{ status: string; reason: string }>
   ) => {
@@ -526,6 +509,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
   return (
     <div className="bg-white border border-gray-300 rounded-md p-3 flex flex-col gap-3">
       <div className="flex flex-wrap gap-2 items-center">
+        {/* 요일 버튼 */}
         <div className="flex gap-1">
           {DAYS.map((d) => (
             <button
@@ -539,6 +523,8 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
             </button>
           ))}
         </div>
+
+        {/* 시간대 버튼 */}
         <div className="flex gap-1 ml-2">
           {TIME_SLOTS.map((t) => (
             <button
@@ -553,6 +539,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
           ))}
         </div>
 
+        {/* 오른쪽 액션들 */}
         <div className="ml-auto flex gap-2">
           <button
             onClick={setAllNoChange}
@@ -581,6 +568,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
         </div>
       </div>
 
+      {/* 표 */}
       <div className="max-h-[520px] overflow-y-auto border rounded">
         <table className="w-full text-sm">
           <thead className="bg-gray-100 sticky top-0 z-10">
@@ -615,7 +603,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
                       onChange={(e) =>
                         updateRow(r.studentId, { status: e.target.value })
                       }
-                      className="border rounded px-1 py-[2px] text-sm w-full"
+                      className="border rounded px-1 py-[2px] text-sm w-full bg-white"
                     >
                       <option value="변경안함">변경안함</option>
                       {STATUS_LIST.map((st) => (
@@ -631,7 +619,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
                       onChange={(e) =>
                         updateRow(r.studentId, { reason: e.target.value })
                       }
-                      className="border rounded px-1 py-[2px] text-sm w-full"
+                      className="border rounded px-1 py-[2px] text-sm w-full bg-white"
                       placeholder="사유"
                     />
                   </td>
@@ -641,9 +629,11 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
           </tbody>
         </table>
       </div>
+
       <p className="text-[11px] text-gray-400">
         ※ “변경안함”으로 둔 학생은 이 차시 스케줄을 적용해도 실제 학생 상태를 바꾸지 않습니다.
       </p>
     </div>
   );
 }
+
