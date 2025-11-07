@@ -175,7 +175,7 @@ export default function DisplayPage() {
     };
 
     load();
-    const t = setInterval(load, 5000); // 500 → 5000
+    const t = setInterval(load, 3000); // 500 → 5000
     return () => {
       alive = false;
       clearInterval(t);

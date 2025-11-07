@@ -86,7 +86,7 @@ export default function TeacherPage() {
     };
 
     tick();
-    const t = setInterval(tick, 5000); // 5초마다
+    const t = setInterval(tick, 3000); // 5초마다
     return () => {
       stop = true;
       clearInterval(t);
