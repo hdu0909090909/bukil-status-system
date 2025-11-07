@@ -92,7 +92,6 @@ if (!g.__schoolData) {
 
       // 5줄
       { id: "11104", name: "김연수", status: "재실", reason: "", approved: true, seatId: "11104", password: "12345678" },
-      { id: "11122", name: "정민건", status: "재실", reason: "", approved: true, seatId: "11122", password: "12345678" },
       { id: "11109", name: "박경민", status: "재실", reason: "", approved: true, seatId: "11109", password: "12345678" },
       { id: "11113", name: "안준영", status: "재실", reason: "", approved: true, seatId: "11113", password: "12345678" },
     ],
