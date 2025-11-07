@@ -53,8 +53,6 @@ export default function TeacherPage() {
   const [tab, setTab] = useState<"status" | "schedule">("status");
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
-
-  // 이게 true일 땐 서버에서 새로 안가져옴
   const pausePollingRef = useRef(false);
 
   // 첫 로드
@@ -75,18 +73,15 @@ export default function TeacherPage() {
     let stop = false;
 
     const tick = async () => {
-      // 일괄 버튼 누른 직후엔 서버 거 가져오지 말고 내 화면 유지
       if (pausePollingRef.current) return;
-
       const res = await fetch("/api/students", { cache: "no-store" });
       if (!res.ok) return;
       const data: Student[] = await res.json();
       data.sort((a, b) => a.id.localeCompare(b.id));
       if (!stop) setStudents(data);
     };
-
     tick();
-    const t = setInterval(tick, 3000); // 5초마다
+    const t = setInterval(tick, 5000);
     return () => {
       stop = true;
       clearInterval(t);
@@ -94,12 +89,9 @@ export default function TeacherPage() {
   }, [tab]);
 
   const saveStudent = async (id: string, updates: Partial<Student>) => {
-    // 내 화면 먼저 반영
     setStudents((prev) =>
       prev.map((s) => (s.id === id ? { ...s, ...updates } : s))
     );
-
-    // 서버에 반영
     await fetch("/api/students", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -107,7 +99,6 @@ export default function TeacherPage() {
     });
   };
 
-  // 공통: 일괄 버튼 누르면 4초간 폴링 잠깐 끄기
   const pausePollingFor4s = () => {
     pausePollingRef.current = true;
     setTimeout(() => {
@@ -115,65 +106,58 @@ export default function TeacherPage() {
     }, 4000);
   };
 
-  // 일괄 재실
+  // ★ 바뀐 부분 1: 일괄 재실 — 순차로 보냄
   const resetAllToPresent = async () => {
     pausePollingFor4s();
 
     const next = students.map((s) => ({ ...s, status: "재실", reason: "" }));
     setStudents(next);
 
-    await Promise.all(
-      students.map((s) =>
-        fetch("/api/students", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: s.id, status: "재실", reason: "" }),
-        })
-      )
-    );
+    for (const s of students) {
+      await fetch("/api/students", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: s.id, status: "재실", reason: "" }),
+      });
+    }
   };
 
-  // 일괄 허가
+  // ★ 바뀐 부분 2: 일괄 허가 — 순차로 보냄
   const approveAll = async () => {
     pausePollingFor4s();
 
     const next = students.map((s) => ({ ...s, approved: true }));
     setStudents(next);
 
-    await Promise.all(
-      students.map((s) =>
-        fetch("/api/students", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: s.id, approved: true }),
-        })
-      )
-    );
+    for (const s of students) {
+      await fetch("/api/students", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: s.id, approved: true }),
+      });
+    }
   };
 
-  // 일괄 불허가
+  // ★ 바뀐 부분 3: 일괄 불허가 — 순차로 보냄
   const disapproveAll = async () => {
     pausePollingFor4s();
 
     const next = students.map((s) => ({ ...s, approved: false }));
     setStudents(next);
 
-    await Promise.all(
-      students.map((s) =>
-        fetch("/api/students", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: s.id, approved: false }),
-        })
-      )
-    );
+    for (const s of students) {
+      await fetch("/api/students", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: s.id, approved: false }),
+      });
+    }
   };
 
   const handleLogout = () => {
     router.push("/");
   };
 
-  // 인원 카드 계산
   const total = students.length;
   const inClassOrMedia = students.filter(
     (s) => s.status === "재실" || s.status === "미디어스페이스"
@@ -187,7 +171,6 @@ export default function TeacherPage() {
   }).length;
   const outCampus = total - inCampus;
 
-  // 스케줄 적용 뒤 바로 상태 새로고침
   const refreshNow = async () => {
     const res = await fetch("/api/students", { cache: "no-store" });
     const data: Student[] = await res.json();
@@ -433,7 +416,6 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
     list: Array<{ studentId: string; name: string; status: string; reason: string }>
   ) => [...list].sort((a, b) => a.studentId.localeCompare(b.studentId));
 
-  // 요일/시간 바뀌면: 1) 스케줄 먼저, 2) 없으면 학생 목록으로 채움
   useEffect(() => {
     const load = async () => {
       setLoading(true);
@@ -459,7 +441,6 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
         }
       }
 
-      // 스케줄이 없으면 현재 학생 목록으로 채움
       const res2 = await fetch("/api/students", { cache: "no-store" });
       if (res2.ok) {
         const students: Student[] = await res2.json();
@@ -482,7 +463,6 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
     load();
   }, [day, slot]);
 
-  // 현재 상태로 채우기
   const fillFromCurrent = async () => {
     const res = await fetch("/api/students", { cache: "no-store" });
     const students: Student[] = await res.json();
@@ -497,14 +477,12 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
     setRows(items);
   };
 
-  // 전체 변경안함
   const setAllNoChange = () => {
     setRows((prev) =>
       prev.map((r) => ({ ...r, status: "변경안함", reason: "" }))
     );
   };
 
-  // 저장
   const saveRows = async () => {
     await fetch("/api/scheduler", {
       method: "POST",
@@ -514,7 +492,6 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
     alert("스케줄을 저장했습니다.");
   };
 
-  // 적용
   const applyTemplate = async () => {
     const res = await fetch("/api/scheduler/apply", {
       method: "POST",
