@@ -1,34 +1,42 @@
 // app/api/scheduler/apply/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { students, schedulerStore } from "@/app/lib/data";
+import { redis } from "@/app/lib/redis";
+import { ensureSeed, SCHED_KEY_PREFIX, STUDENTS_KEY } from "@/app/lib/seed";
 
-// POST /api/scheduler/apply  { day, slot }
+// POST { day, slot }
 export async function POST(req: NextRequest) {
+  await ensureSeed();
   const { day, slot } = await req.json();
 
   if (!day || !slot) {
-    return NextResponse.json(
-      { ok: false, message: "day, slot 필요" },
-      { status: 400 }
-    );
+    return NextResponse.json({ ok: false, message: "day, slot이 필요합니다." }, { status: 400 });
   }
 
-  const key = `${day}|${slot}`;
-  const plan = schedulerStore[key];
+  const key = `${SCHED_KEY_PREFIX}${day}|${slot}`;
+  const plan = (await redis.get(key)) as
+    | { day: string; slot: string; items: Array<{ studentId: string; name: string; status: string; reason: string }> }
+    | null;
 
-  if (!plan || !Array.isArray(plan.items)) {
-    // 저장된 스케줄 없으면 그냥 성공만
-    return NextResponse.json({ ok: true, message: "no plan" });
+  if (!plan) {
+    return NextResponse.json({ ok: false, message: "해당 시간에 저장된 스케줄이 없습니다." }, { status: 404 });
   }
 
-  for (const item of plan.items) {
-    // "변경안함"은 건너뛴다
-    if (item.status === "변경안함") continue;
-    const st = students.find((s) => s.id === item.studentId);
-    if (!st) continue;
-    st.status = item.status;
-    st.reason = item.reason ?? "";
-  }
+  // 현재 학생들
+  const students = ((await redis.get(STUDENTS_KEY)) as any[]) ?? [];
+
+  // 스케줄에서 "변경안함" 아닌 것만 학생에 반영
+  const next = students.map((s) => {
+    const item = plan.items.find((i) => i.studentId === s.id);
+    if (!item) return s;
+    if (item.status === "변경안함") return s;
+    return {
+      ...s,
+      status: item.status,
+      reason: item.reason ?? "",
+    };
+  });
+
+  await redis.set(STUDENTS_KEY, next);
 
   return NextResponse.json({ ok: true });
 }
