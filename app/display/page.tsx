@@ -59,6 +59,7 @@ const SEAT_POS: Record<string, { x: number; y: number }> = {
   "11116": { x: 440, y: 230 },
 
   "11104": { x: 40, y: 300 },
+  "11122": { x: 140, y: 300 },
   "11109": { x: 240, y: 300 },
   "11113": { x: 340, y: 300 },
 };
@@ -68,7 +69,9 @@ const sortById = <T extends { id: string }>(list: T[]) =>
   [...list].sort((a, b) => Number(a.id) - Number(b.id));
 
 // 상태 → 박스
-function statusToPlace(status: string): "classroom" | "mediaspace" | "gone" | "etc" {
+function statusToPlace(
+  status: string
+): "classroom" | "mediaspace" | "gone" | "etc" {
   if (status === "재실") return "classroom";
   if (status === "미디어스페이스") return "mediaspace";
   if (status === "귀가" || status === "외출") return "gone";
@@ -129,22 +132,22 @@ export default function DisplayPage() {
     return () => clearInterval(t);
   }, []);
 
-  // 학생 데이터 0.5초마다
+  // 학생 데이터 5초마다 (원래 0.5초였던 곳)
   useEffect(() => {
     let alive = true;
 
     const load = async () => {
-      const res = await fetch("/api/students");
+      const res = await fetch("/api/students", { cache: "no-store" });
       if (!res.ok) return;
       const data: Student[] = await res.json();
 
+      // 날짜별 자동 재실 로직 그대로
       const today = new Date().toISOString().slice(0, 10);
       const lastReset =
         typeof window !== "undefined"
           ? localStorage.getItem("student-last-reset")
           : null;
 
-      // 날짜 바뀌면 자동 재실
       if (lastReset !== today) {
         const resetData = data.map((s) => ({
           ...s,
@@ -172,14 +175,14 @@ export default function DisplayPage() {
     };
 
     load();
-    const t = setInterval(load, 500);
+    const t = setInterval(load, 5000); // 500 → 5000
     return () => {
       alive = false;
       clearInterval(t);
     };
   }, []);
 
-  // 시간대 스케줄 자동 적용
+  // 시간대 스케줄 자동 적용 (이건 30초로 놔둬도 돼)
   useEffect(() => {
     const checkAndApply = async () => {
       const d = new Date();
@@ -239,7 +242,7 @@ export default function DisplayPage() {
     localStorage.setItem("student-last-reset", today);
   };
 
-  // 분류 (여기도 정렬 유지)
+  // 분류
   const classroomStudents = students.filter(
     (s) => statusToPlace(s.status) === "classroom" && s.seatId
   );
@@ -389,7 +392,7 @@ export default function DisplayPage() {
             {/* 오른쪽: 미디어/귀가 + 인원 */}
             <div className="flex-1 flex gap-3 min-h-0 h-[420px]">
               {/* 왼쪽 세로: 미디어 + 귀가 */}
-              <div className="w-[280px] flex flex-col gap-3 h-full min-h-0">
+              <div className="w-[360px] flex flex-col gap-3 h-full min-h-0">
                 {/* 미디어스페이스 */}
                 <div className="border-2 border-black flex-1 flex flex-col min-h-0">
                   <div className="text-center font-bold py-1 border-b border-black bg-white">
