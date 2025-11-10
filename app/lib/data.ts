@@ -1,6 +1,5 @@
 // app/lib/data.ts
 
-// 상태 종류
 export type Status =
   | "재실"
   | "미디어스페이스"
@@ -32,27 +31,26 @@ export type TeacherUser = {
   password: string;
 };
 
-// 스케줄에 한 줄
 export type SchedulerItem = {
   studentId: string;
   name: string;
-  status: string; // "변경안함" 포함
+  status: string;
   reason: string;
 };
 
-// day|slot 하나에 저장되는 거
 export type SchedulerPlan = {
-  day: string;   // "mon"
-  slot: string;  // "8교시"
+  day: string;
+  slot: string;
   items: SchedulerItem[];
 };
 
-// 🔴 개발 중에 hot reload 돼도 데이터 안 날리려고 globalThis에 박아둠
 const g = globalThis as unknown as {
   __schoolData?: {
     students: Student[];
     teacherUsers: TeacherUser[];
     schedulerStore: Record<string, SchedulerPlan>;
+    schedulerEnabled: boolean;     // ✅ 스케줄러 on/off
+    lastDailyReset: string | null; // ✅ "2025-11-10" 이런 포맷
   };
 };
 
@@ -90,7 +88,7 @@ if (!g.__schoolData) {
       { id: "11117", name: "이승화", status: "재실", reason: "", approved: true, seatId: "11117", password: "12345678" },
       { id: "11116", name: "이승우", status: "재실", reason: "", approved: true, seatId: "11116", password: "12345678" },
 
-      // 5줄
+      // 5줄 (정민건 제거된 상태라 가정)
       { id: "11104", name: "김연수", status: "재실", reason: "", approved: true, seatId: "11104", password: "12345678" },
       { id: "11109", name: "박경민", status: "재실", reason: "", approved: true, seatId: "11109", password: "12345678" },
       { id: "11113", name: "안준영", status: "재실", reason: "", approved: true, seatId: "11113", password: "12345678" },
@@ -101,10 +99,33 @@ if (!g.__schoolData) {
       { id: "함주완", name: "함주완 학생", password: "admin" },
       { id: "최배겸", name: "최배겸 학생", password: "admin" },
     ],
-    schedulerStore: {}, // 비어있다가 /api/scheduler 로 채움
+    schedulerStore: {},
+    schedulerEnabled: true,   // 기본 ON
+    lastDailyReset: null,     // 아직 안함
   };
 }
 
+// 이거 내보내서 api들이 매번 호출하게 할 거야
 export const students = g.__schoolData.students;
 export const teacherUsers = g.__schoolData.teacherUsers;
 export const schedulerStore = g.__schoolData.schedulerStore;
+export const schedulerEnabledRef = g.__schoolData; // enabled랑 lastDailyReset 둘 다 여기 있음
+
+// ✅ 하루 한 번, 08:00 이후에 처음 호출됐을 때 전원 재실
+export function ensureDailyReset() {
+  const now = new Date();
+
+  // 한국시간 기준이면 여기서 +9 해도 되고, 지금은 서버 시간이 한국이라고 가정
+  const todayStr = now.toISOString().slice(0, 10); // "2025-11-10"
+  const hour = now.getHours();
+
+  // 8시 이후고, 오늘 아직 안했으면
+  if (hour >= 8 && g.__schoolData!.lastDailyReset !== todayStr) {
+    for (const s of g.__schoolData!.students) {
+      s.status = "재실";
+      s.reason = "";
+      // 허가여부는 그대로 두는게 자연스럽다고 보고 그대로 둠
+    }
+    g.__schoolData!.lastDailyReset = todayStr;
+  }
+}
