@@ -1,29 +1,24 @@
 // app/api/students/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { students, ensureDailyReset } from "@/app/lib/data";
+import { students } from "@/app/lib/data";
 
-// 공통: 학번순 정렬해서 보내기
 function getSortedStudents() {
   return [...students].sort((a, b) => Number(a.id) - Number(b.id));
 }
 
 // GET /api/students
 export async function GET() {
-  // 08:00 이후 최초 요청이면 여기서 한 번 전체 재실로 맞춘다
-  ensureDailyReset();
+  // ❌ 여기서 더 이상 ensureDailyReset() 안 부른다
   return NextResponse.json(getSortedStudents(), { status: 200 });
 }
 
 // PATCH /api/students
-// 1) 한 명만 수정: { id, status?, reason?, approved? }
-// 2) 여러 명 한꺼번에: [{ id, ... }, { id, ... }]
+// 1) [{...}, {...}] 벌크
+// 2) {...} 단건
 export async function PATCH(req: NextRequest) {
-  // 패치 들어올 때도 날짜 체크 한번
-  ensureDailyReset();
-
   const body = await req.json();
 
-  // 배열이면 벌크 업데이트
+  // 배열이면 벌크
   if (Array.isArray(body)) {
     for (const item of body) {
       const { id, ...updates } = item as { id: string; [key: string]: any };
@@ -41,7 +36,7 @@ export async function PATCH(req: NextRequest) {
     );
   }
 
-  // 단일 업데이트
+  // 단건
   const { id, ...updates } = body as { id?: string; [key: string]: any };
   if (!id) {
     return NextResponse.json(
