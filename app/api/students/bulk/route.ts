@@ -1,53 +1,57 @@
-// app/api/students/route.ts
+// app/api/students/bulk/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { students } from "@/app/lib/data";
+import { students, ensureDailyReset } from "@/app/lib/data";
 
-// 공통: 항상 학번순으로 정렬해서 내보내기
-function getSortedStudents() {
-  return [...students].sort((a, b) => Number(a.id) - Number(b.id));
-}
+// POST /api/students/bulk
+// { updates: [ { id: "11101", status: "재실", approved: true, reason: "" }, ... ] }
+export async function POST(req: NextRequest) {
+  try {
+    // 🔵 여기서도 하루 한 번 리셋 로직을 태워서
+    // GET이든 POST든 같은 기준을 쓰게 한다
+    ensureDailyReset();
 
-// GET /api/students
-export async function GET() {
-  return NextResponse.json(getSortedStudents(), { status: 200 });
-}
+    const body = await req.json();
+    const updates = body.updates as Array<
+      Partial<{
+        id: string;
+        status: string;
+        reason: string;
+        approved: boolean;
+      }>
+    >;
 
-// PATCH /api/students
-// 1) 단건: { id, ...updates }
-// 2) 벌크: [ { id, ...updates }, { id, ...updates }, ... ]
-export async function PATCH(req: NextRequest) {
-  const body = await req.json();
+    if (!Array.isArray(updates)) {
+      return NextResponse.json(
+        { ok: false, message: "updates 배열이 필요합니다." },
+        { status: 400 }
+      );
+    }
 
-  // 배열이면 벌크 업데이트
-  if (Array.isArray(body)) {
-    for (const item of body) {
-      const { id, ...updates } = item as { id: string; [key: string]: any };
-      const target = students.find((s) => s.id === id);
-      if (target) {
-        Object.assign(target, updates);
+    for (const u of updates) {
+      if (!u.id) continue;
+      const st = students.find((s) => s.id === u.id);
+      if (!st) continue;
+
+      if (typeof u.status === "string") {
+        st.status = u.status;
+      }
+      if (typeof u.reason === "string") {
+        st.reason = u.reason;
+      }
+      if (typeof u.approved === "boolean") {
+        st.approved = u.approved;
       }
     }
-    return NextResponse.json({ ok: true, students: getSortedStudents() });
-  }
 
-  // 단건 업데이트
-  const { id, ...updates } = body as { id: string; [key: string]: any };
-  if (!id) {
+    // 🔵 교원 페이지가 이걸 바로 다시 그릴 수 있게 전체를 내려준다
+    const sorted = [...students].sort((a, b) => Number(a.id) - Number(b.id));
+
+    return NextResponse.json({ ok: true, students: sorted }, { status: 200 });
+  } catch (err) {
+    console.error("bulk update error", err);
     return NextResponse.json(
-      { ok: false, message: "id가 필요합니다." },
-      { status: 400 }
+      { ok: false, message: "서버 오류" },
+      { status: 500 }
     );
   }
-
-  const target = students.find((s) => s.id === id);
-  if (!target) {
-    return NextResponse.json(
-      { ok: false, message: "해당 학생을 찾을 수 없습니다." },
-      { status: 404 }
-    );
-  }
-
-  Object.assign(target, updates);
-
-  return NextResponse.json({ ok: true, student: target });
 }

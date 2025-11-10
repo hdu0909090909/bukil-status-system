@@ -56,8 +56,6 @@ export default function TeacherPage() {
   const [tab, setTab] = useState<"status" | "schedule">("status");
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
-
-  // 내가 최근에 손댄 학생들 (id -> timestamp)
   const [editingIds, setEditingIds] = useState<Record<string, number>>({});
 
   // 최초 로드
@@ -84,12 +82,11 @@ export default function TeacherPage() {
       if (stop) return;
 
       const now = Date.now();
-
       setStudents((prev) => {
         const prevById = new Map(prev.map((s) => [s.id, s]));
         const merged = data.map((s) => {
           const editedAt = editingIds[s.id];
-          // 2초 안에 내가 만진 애는 내 값 우선
+          // 2초 안에 내가 만진 애는 내 값 유지
           if (editedAt && now - editedAt < 2000) {
             return prevById.get(s.id) ?? s;
           }
@@ -111,28 +108,25 @@ export default function TeacherPage() {
     setEditingIds((prev) => ({ ...prev, [id]: Date.now() }));
   };
 
-  // ✅ 여기서 bulk 엔드포인트 사용
+  // ✅ 여기에서 올바른 엔드포인트로 보낸다
   const bulkUpdate = async (
     updates: Array<
       Partial<Pick<Student, "status" | "reason" | "approved">> & { id: string }
     >
   ) => {
-    // 화면 먼저 반영
+    // 화면 먼저
     setStudents((prev) => {
-      const map = new Map(prev.map((s) => [s.id, s]));
+      const m = new Map(prev.map((s) => [s.id, s]));
       for (const u of updates) {
-        const old = map.get(u.id);
-        if (old) {
-          map.set(u.id, { ...old, ...u });
-        }
+        const old = m.get(u.id);
+        if (old) m.set(u.id, { ...old, ...u });
       }
-      return sortById(Array.from(map.values()));
+      return sortById(Array.from(m.values()));
     });
 
     updates.forEach((u) => markEdited(u.id));
 
-    // 서버에 한 방에 보내기
-    const res = await fetch("/student/bulk", {
+    const res = await fetch("/api/students/bulk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ updates }),
@@ -140,17 +134,18 @@ export default function TeacherPage() {
 
     if (res.ok) {
       const data = await res.json();
-      // bulk가 최신 students를 주면 그걸로 덮어준다
+      // 너네 bulk가 이렇게 내려줄 거라고 가정
       if (data && Array.isArray(data.students)) {
         setStudents(sortById(data.students));
+        return;
       }
-    } else {
-      // 혹시 실패하면 다시 한번 전체 로드
-      const res2 = await fetch("/api/students", { cache: "no-store" });
-      if (res2.ok) {
-        const latest: Student[] = await res2.json();
-        setStudents(sortById(latest));
-      }
+    }
+
+    // 실패하면 전체 다시 불러오기
+    const res2 = await fetch("/api/students", { cache: "no-store" });
+    if (res2.ok) {
+      const latest: Student[] = await res2.json();
+      setStudents(sortById(latest));
     }
   };
 
@@ -158,21 +153,18 @@ export default function TeacherPage() {
     await bulkUpdate([{ id, ...updates }]);
   };
 
-  // 일괄 기능
+  // 일괄 버튼들
   const resetAllToPresent = async () => {
     await bulkUpdate(
       students.map((s) => ({ id: s.id, status: "재실", reason: "" }))
     );
   };
-
   const approveAll = async () => {
     await bulkUpdate(students.map((s) => ({ id: s.id, approved: true })));
   };
-
   const disapproveAll = async () => {
     await bulkUpdate(students.map((s) => ({ id: s.id, approved: false })));
   };
-
   const resetAllExceptOut = async () => {
     await bulkUpdate(
       students
@@ -181,11 +173,8 @@ export default function TeacherPage() {
     );
   };
 
-  const handleLogout = () => {
-    router.push("/");
-  };
+  const handleLogout = () => router.push("/");
 
-  // 인원 카드 계산
   const total = students.length;
   const inClassOrMedia = students.filter(
     (s) => s.status === "재실" || s.status === "미디어스페이스"
@@ -350,7 +339,7 @@ export default function TeacherPage() {
                               onChange={(e) => {
                                 const v = e.target.value;
                                 markEdited(s.id);
-                                // 일단 로컬에만 반영
+                                // 일단 화면에만
                                 setStudents((prev) =>
                                   prev.map((p) =>
                                     p.id === s.id ? { ...p, reason: v } : p
@@ -358,7 +347,6 @@ export default function TeacherPage() {
                                 );
                               }}
                               onBlur={(e) => {
-                                // blur될 때만 서버로 저장
                                 saveStudent(s.id, { reason: e.target.value });
                               }}
                               className="border rounded px-1 py-[2px] text-sm w-full"
@@ -451,9 +439,9 @@ export default function TeacherPage() {
   );
 }
 
-/* ──────────────────────────────── */
-/* 스케줄러 탭 (그대로) */
-/* ──────────────────────────────── */
+/* ───────────────────────── */
+/* 스케줄러 탭은 기존 버전 그대로 */
+/* ───────────────────────── */
 function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
   const [day, setDay] = useState<DayKey>("mon");
   const [slot, setSlot] = useState<TimeSlot>("8교시");
@@ -499,6 +487,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
           return;
         }
       }
+
       const res2 = await fetch("/api/students", { cache: "no-store" });
       if (res2.ok) {
         const students: Student[] = await res2.json();
@@ -515,6 +504,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
       } else {
         setRows([]);
       }
+
       setLoading(false);
     };
     load();
@@ -531,7 +521,9 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
   };
 
   const setAllNoChange = () => {
-    setRows((prev) => prev.map((r) => ({ ...r, status: "변경안함", reason: "" })));
+    setRows((prev) =>
+      prev.map((r) => ({ ...r, status: "변경안함", reason: "" }))
+    );
   };
 
   const fillFromCurrent = async () => {
