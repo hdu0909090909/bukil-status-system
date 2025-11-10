@@ -1,3 +1,4 @@
+// app/display/page.tsx
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -64,7 +65,7 @@ const SEAT_POS: Record<string, { x: number; y: number }> = {
   "11113": { x: 340, y: 300 },
 };
 
-// 공통 정렬 함수
+// 공통 정렬
 const sortById = <T extends { id: string }>(list: T[]) =>
   [...list].sort((a, b) => Number(a.id) - Number(b.id));
 
@@ -132,8 +133,7 @@ export default function DisplayPage() {
     return () => clearInterval(t);
   }, []);
 
-  // ✅ 학생 데이터 주기적으로 가져오기
-  //    여기에서 "오늘 처음이면 전원 재실로 PATCH" 하던 부분만 뺐다.
+  // ✅ 학생 데이터 주기적으로 불러오기 (이제 여기서 전체 재실로 PATCH 안 함)
   useEffect(() => {
     let alive = true;
 
@@ -141,18 +141,20 @@ export default function DisplayPage() {
       const res = await fetch("/api/students", { cache: "no-store" });
       if (!res.ok) return;
       const data: Student[] = await res.json();
-      if (alive) setStudents(sortById(data));
+      if (alive) {
+        setStudents(sortById(data));
+      }
     };
 
     load();
-    const t = setInterval(load, 2000);
+    const t = setInterval(load, 2000); // 네가 쓰던 2초 폴링
     return () => {
       alive = false;
       clearInterval(t);
     };
   }, []);
 
-  // 시간대 스케줄 자동 적용
+  // 시간대 스케줄 자동 적용 (이건 네가 쓰던 그대로)
   useEffect(() => {
     const checkAndApply = async () => {
       const d = new Date();
@@ -177,7 +179,7 @@ export default function DisplayPage() {
     return () => clearInterval(t);
   }, []);
 
-  // 디스플레이에서 수정
+  // 디스플레이에서 직접 수정
   const saveStudent = async (id: string, updates: Partial<Student>) => {
     setStudents((prev) =>
       sortById(prev.map((s) => (s.id === id ? { ...s, ...updates } : s)))
@@ -189,7 +191,7 @@ export default function DisplayPage() {
     });
   };
 
-  // 일괄 재실 (이건 남겨둠)
+  // 일괄 재실 (이건 버튼 눌렀을 때만 동작)
   const resetAllToPresent = async () => {
     const updated = students.map((s) => ({
       ...s,
@@ -231,7 +233,7 @@ export default function DisplayPage() {
   }
   const etcStatusKeys = Object.keys(etcByStatus);
 
-  // 인원
+  // 인원 카드
   const totalCount = students.length;
   const inClassOrMedia = students.filter((s) => {
     const place = statusToPlace(s.status);
@@ -317,7 +319,9 @@ export default function DisplayPage() {
                         <button
                           disabled
                           className={`text-[11px] px-2 py-[2px] rounded w-full ${
-                            s.approved ? "bg-green-500 text-white" : "bg-gray-300"
+                            s.approved
+                              ? "bg-green-500 text-white"
+                              : "bg-gray-300"
                           }`}
                         >
                           {s.approved ? "O" : "X"}
