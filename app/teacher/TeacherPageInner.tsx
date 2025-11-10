@@ -57,6 +57,8 @@ export default function TeacherPage() {
   const [tab, setTab] = useState<"status" | "schedule">("status");
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
+  // ✅ 지금 업데이트 중인 학생들
+  const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
 
   // 최초 로드
   useEffect(() => {
@@ -78,7 +80,20 @@ export default function TeacherPage() {
       const res = await fetch("/api/students", { cache: "no-store" });
       if (!res.ok) return;
       const data: Student[] = await res.json();
-      if (!stop) setStudents(sortById(data));
+
+      if (!stop) {
+        // ✅ pending 중인 애는 덮어쓰지 않음
+        setStudents((prev) => {
+          const prevById = new Map(prev.map((s) => [s.id, s]));
+          const merged = data.map((s) => {
+            if (pendingIds.has(s.id)) {
+              return prevById.get(s.id) ?? s;
+            }
+            return s;
+          });
+          return sortById(merged);
+        });
+      }
     };
 
     tick();
@@ -88,7 +103,7 @@ export default function TeacherPage() {
       stop = true;
       clearInterval(t);
     };
-  }, [tab]);
+  }, [tab, pendingIds]);
 
   // 한 번에 PATCH
   const bulkUpdate = async (
@@ -96,7 +111,14 @@ export default function TeacherPage() {
       Partial<Pick<Student, "status" | "reason" | "approved">> & { id: string }
     >
   ) => {
-    // 1) 낙관적
+    // ✅ 0) 지금 수정 중이라고 표시
+    setPendingIds((prev) => {
+      const next = new Set(prev);
+      updates.forEach((u) => next.add(u.id));
+      return next;
+    });
+
+    // 1) 낙관적 업데이트
     setStudents((prev) => {
       const map = new Map(prev.map((s) => [s.id, s]));
       for (const u of updates) {
@@ -119,6 +141,13 @@ export default function TeacherPage() {
       const latest: Student[] = await res.json();
       setStudents(sortById(latest));
     }
+
+    // ✅ 4) pending 해제
+    setPendingIds((prev) => {
+      const next = new Set(prev);
+      updates.forEach((u) => next.delete(u.id));
+      return next;
+    });
   };
 
   const saveStudent = async (id: string, updates: Partial<Student>) => {
@@ -444,7 +473,6 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
           }>) ?? [];
 
         if (items.length > 0) {
-          // 학생 번호순
           setRows(
             [...items].sort(
               (a, b) => Number(a.studentId) - Number(b.studentId)
@@ -576,7 +604,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
 
         {/* 오른쪽 버튼들 */}
         <div className="ml-auto flex gap-2 items-center">
-          {/* 🔵 여기 토글 추가 */}
+          {/* 스케줄러 on/off */}
           <button
             onClick={toggleScheduler}
             className={`px-3 py-1 text-sm rounded ${

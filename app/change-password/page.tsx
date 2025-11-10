@@ -5,9 +5,14 @@ import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 export default function ChangePasswordPageOuter() {
-  // Vercel이 요구하는 Suspense 래핑
   return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">로딩중...</div>}>
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center">
+          로딩중...
+        </div>
+      }
+    >
       <ChangePasswordPageInner />
     </Suspense>
   );
@@ -17,13 +22,12 @@ function ChangePasswordPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // /change-password?role=student&id=11101 이런 식으로 오면 자동 세팅
   const initialRole =
     (searchParams.get("role") as "student" | "teacher" | null) || "student";
   const initialId = searchParams.get("id") || "";
 
   const [tab, setTab] = useState<"student" | "teacher">(initialRole);
-  const [userId, setUserId] = useState(initialId); // 학생이면 학번, 교원이면 아이디
+  const [userId, setUserId] = useState(initialId);
   const [oldPw, setOldPw] = useState("");
   const [newPw, setNewPw] = useState("");
   const [newPw2, setNewPw2] = useState("");
@@ -61,8 +65,8 @@ function ChangePasswordPageInner() {
         body: JSON.stringify({
           role: tab,
           id: userId.trim(),
-          oldPw,
-          newPw,
+          oldPassword: oldPw, // ✅ 서버에 맞춘 키
+          newPassword: newPw, // ✅ 서버에 맞춘 키
         }),
       });
 
@@ -73,9 +77,7 @@ function ChangePasswordPageInner() {
       }
 
       setOkMsg("비밀번호가 변경되었습니다. 다시 로그인해주세요.");
-      setTimeout(() => {
-        router.push("/");
-      }, 1500);
+      setTimeout(() => router.push("/"), 1500);
     } catch (err) {
       setError("서버와 통신 중 오류가 발생했습니다.");
     } finally {
@@ -90,7 +92,7 @@ function ChangePasswordPageInner() {
           비밀번호 변경
         </h1>
 
-        {/* 탭 (학생 / 교원) */}
+        {/* 탭 선택 */}
         <div className="flex bg-[#e9edf2] rounded-lg overflow-hidden mb-6">
           <button
             type="button"
@@ -125,7 +127,6 @@ function ChangePasswordPageInner() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* 아이디 / 학번 */}
           <div>
             <label className="block text-sm mb-1 text-gray-800">
               {tab === "student" ? "학번" : "교원 아이디"}
@@ -140,7 +141,6 @@ function ChangePasswordPageInner() {
             />
           </div>
 
-          {/* 현재 비밀번호 */}
           <div>
             <label className="block text-sm mb-1 text-gray-800">
               현재 비밀번호
@@ -152,19 +152,8 @@ function ChangePasswordPageInner() {
               className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#1976ff] text-sm"
               placeholder="현재 비밀번호를 입력하세요."
             />
-            {tab === "student" && (
-              <p className="text-[11px] text-gray-400 mt-1">
-                (※초기 비밀번호: 12345678)
-              </p>
-            )}
-            {tab === "teacher" && (
-              <p className="text-[11px] text-gray-400 mt-1">
-                뀨?
-              </p>
-            )}
           </div>
 
-          {/* 새 비밀번호 */}
           <div>
             <label className="block text-sm mb-1 text-gray-800">
               새 비밀번호
@@ -178,7 +167,6 @@ function ChangePasswordPageInner() {
             />
           </div>
 
-          {/* 새 비밀번호 확인 */}
           <div>
             <label className="block text-sm mb-1 text-gray-800">
               새 비밀번호 확인
