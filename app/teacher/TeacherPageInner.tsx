@@ -1,6 +1,7 @@
+// app/teacher/TeacherPageInner.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 /* 공통 상태 목록 */
@@ -46,7 +47,7 @@ type TimeSlot = (typeof TIME_SLOTS)[number];
 const sortById = <T extends { id: string }>(list: T[]) =>
   [...list].sort((a, b) => Number(a.id) - Number(b.id));
 
-export default function TeacherPage() {
+export default function TeacherPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const userParam = searchParams.get("user") || "윤인하";
@@ -57,8 +58,9 @@ export default function TeacherPage() {
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // 내가 최근에 손댄 학생 (id -> timestamp)
-  const [editingIds, setEditingIds] = useState<Record<string, number>>({});
+  // ✅ 여기: 내가 최근에 건드린 시각을 기억하는 ref (state 아님)
+  //   { "11101": 1731231231231, ... }
+  const editedRef = useRef<Record<string, number>>({});
 
   // 최초 로드
   useEffect(() => {
@@ -71,7 +73,7 @@ export default function TeacherPage() {
     load();
   }, []);
 
-  // 상태 탭일 때만 폴링
+  // ✅ 상태 탭일 때만 폴링 + 최근 10초 안에 내가 만진 애는 서버값으로 덮어쓰지 않기
   useEffect(() => {
     if (tab !== "status") return;
 
@@ -84,12 +86,14 @@ export default function TeacherPage() {
       if (stop) return;
 
       const now = Date.now();
+      const editedMap = editedRef.current;
+
       setStudents((prev) => {
         const prevById = new Map(prev.map((s) => [s.id, s]));
         const merged = data.map((s) => {
-          const editedAt = editingIds[s.id];
-          // 2초 안에 내가 건드린 애는 덮어쓰지 않음
-          if (editedAt && now - editedAt < 2000) {
+          const editedAt = editedMap[s.id];
+          // ✅ 10초 안에 내가 만진 학생이면 서버값 무시
+          if (editedAt && now - editedAt < 10_000) {
             return prevById.get(s.id) ?? s;
           }
           return s;
@@ -98,19 +102,20 @@ export default function TeacherPage() {
       });
     };
 
-    // 처음 한 번
+    // 처음 한번 불러오고
     tick();
-    // ✅ 여기서 새로고침 주기를 3초로 완화
+    // 3초마다
     const t = setInterval(tick, 3000);
 
     return () => {
       stop = true;
       clearInterval(t);
     };
-  }, [tab, editingIds]);
+  }, [tab]);
 
+  // ✅ 이 함수로 표시해두면 위 폴링에서 10초 동안은 안 덮어씀
   const markEdited = (id: string) => {
-    setEditingIds((prev) => ({ ...prev, [id]: Date.now() }));
+    editedRef.current[id] = Date.now();
   };
 
   // ✅ bulk 엔드포인트 사용
@@ -119,7 +124,7 @@ export default function TeacherPage() {
       Partial<Pick<Student, "status" | "reason" | "approved">> & { id: string }
     >
   ) => {
-    // 1) 화면 먼저
+    // 1) 화면 먼저 반영
     setStudents((prev) => {
       const m = new Map(prev.map((s) => [s.id, s]));
       for (const u of updates) {
@@ -131,16 +136,20 @@ export default function TeacherPage() {
       return sortById(Array.from(m.values()));
     });
 
-    updates.forEach((u) => markEdited(u.id));
+    // 2) 방금 건드렸다고 표시
+    updates.forEach((u) => {
+      if (u.id) markEdited(u.id);
+    });
 
-    // 2) 서버로 한 번에
+    // 3) 서버 반영
     const res = await fetch("/api/students/bulk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ updates }),
     });
 
-    // 3) 서버가 최신 students를 주면 그걸로 덮어
+    // 4) 서버가 전체를 돌려주면 그걸로 덮어쓰되,
+    //    그 순간에도 10초 안인 애는 위 폴링 로직이 막아줄 거라 그냥 세팅해도 됨
     if (res.ok) {
       const data = await res.json();
       if (data && Array.isArray(data.students)) {
@@ -149,7 +158,7 @@ export default function TeacherPage() {
       }
     }
 
-    // 실패하면 전체 다시
+    // 혹시 실패하면 전체 다시 불러오기
     const res2 = await fetch("/api/students", { cache: "no-store" });
     if (res2.ok) {
       const latest: Student[] = await res2.json();
@@ -298,9 +307,15 @@ export default function TeacherPage() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-100 sticky top-0 z-10">
                     <tr>
-                      <th className="px-2 py-2 w-20 text-left border-b">학번</th>
-                      <th className="px-2 py-2 w-28 text-left border-b">이름</th>
-                      <th className="px-2 py-2 w-40 text-left border-b">상태</th>
+                      <th className="px-2 py-2 w-20 text-left border-b">
+                        학번
+                      </th>
+                      <th className="px-2 py-2 w-28 text-left border-b">
+                        이름
+                      </th>
+                      <th className="px-2 py-2 w-40 text-left border-b">
+                        상태
+                      </th>
                       <th className="px-2 py-2 text-left border-b">사유</th>
                       <th className="px-2 py-2 w-16 text-left border-b">
                         허가
@@ -348,7 +363,7 @@ export default function TeacherPage() {
                               onChange={(e) => {
                                 const v = e.target.value;
                                 markEdited(s.id);
-                                // 일단 화면에만 반영
+                                // 화면에는 바로
                                 setStudents((prev) =>
                                   prev.map((p) =>
                                     p.id === s.id ? { ...p, reason: v } : p
@@ -356,7 +371,7 @@ export default function TeacherPage() {
                                 );
                               }}
                               onBlur={(e) => {
-                                // 포커스 빠질 때만 서버 실제 반영
+                                // 포커스 빠질 때 서버 반영
                                 saveStudent(s.id, { reason: e.target.value });
                               }}
                               className="border rounded px-1 py-[2px] text-sm w-full"
@@ -664,7 +679,9 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
             <tr>
               <th className="px-2 py-2 w-20 text-left border-b">학번</th>
               <th className="px-2 py-2 w-24 text-left border-b">이름</th>
-              <th className="px-2 py-2 w-32 text-left border-b">이 시간 상태</th>
+              <th className="px-2 py-2 w-32 text-left border-b">
+                이 시간 상태
+              </th>
               <th className="px-2 py-2 text-left border-b">사유</th>
             </tr>
           </thead>
