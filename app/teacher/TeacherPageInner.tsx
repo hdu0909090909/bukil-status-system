@@ -43,7 +43,6 @@ const TIME_SLOTS = ["8교시", "야간 1차시", "야간 2차시"] as const;
 type DayKey = (typeof DAYS)[number]["key"];
 type TimeSlot = (typeof TIME_SLOTS)[number];
 
-// 학번순 정렬
 const sortById = <T extends { id: string }>(list: T[]) =>
   [...list].sort((a, b) => Number(a.id) - Number(b.id));
 
@@ -57,10 +56,9 @@ export default function TeacherPage() {
   const [tab, setTab] = useState<"status" | "schedule">("status");
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
-  // ✅ 지금 업데이트 중인 학생들
-  const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
+  const [isMutating, setIsMutating] = useState(false); // ✅ 수정 중 여부
 
-  // 최초 로드
+  // 최초 1회 로드
   useEffect(() => {
     const load = async () => {
       const res = await fetch("/api/students", { cache: "no-store" });
@@ -74,28 +72,22 @@ export default function TeacherPage() {
   // 상태 탭일 때만 폴링
   useEffect(() => {
     if (tab !== "status") return;
+
     let stop = false;
 
     const tick = async () => {
+      // ✅ 지금 누가 수정 중이면 이번 턴은 스킵
+      if (isMutating) return;
+
       const res = await fetch("/api/students", { cache: "no-store" });
       if (!res.ok) return;
       const data: Student[] = await res.json();
-
       if (!stop) {
-        // ✅ pending 중인 애는 덮어쓰지 않음
-        setStudents((prev) => {
-          const prevById = new Map(prev.map((s) => [s.id, s]));
-          const merged = data.map((s) => {
-            if (pendingIds.has(s.id)) {
-              return prevById.get(s.id) ?? s;
-            }
-            return s;
-          });
-          return sortById(merged);
-        });
+        setStudents(sortById(data));
       }
     };
 
+    // 첫 번째 한 번
     tick();
     const t = setInterval(tick, 1000);
 
@@ -103,7 +95,7 @@ export default function TeacherPage() {
       stop = true;
       clearInterval(t);
     };
-  }, [tab, pendingIds]);
+  }, [tab, isMutating]);
 
   // 한 번에 PATCH
   const bulkUpdate = async (
@@ -111,67 +103,57 @@ export default function TeacherPage() {
       Partial<Pick<Student, "status" | "reason" | "approved">> & { id: string }
     >
   ) => {
-    // ✅ 0) 지금 수정 중이라고 표시
-    setPendingIds((prev) => {
-      const next = new Set(prev);
-      updates.forEach((u) => next.add(u.id));
-      return next;
-    });
+    // ✅ 폴링 잠깐 멈춤
+    setIsMutating(true);
 
-    // 1) 낙관적 업데이트
+    // 1) 화면 먼저 적용
     setStudents((prev) => {
       const map = new Map(prev.map((s) => [s.id, s]));
       for (const u of updates) {
         const old = map.get(u.id);
-        if (old) map.set(u.id, { ...old, ...u });
+        if (old) {
+          map.set(u.id, { ...old, ...u });
+        }
       }
       return sortById(Array.from(map.values()));
     });
 
-    // 2) 서버
+    // 2) 서버 반영
     await fetch("/api/students", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(updates),
     });
 
-    // 3) 확정
+    // 3) 서버 최신값으로 한 번 더 맞춰줌
     const res = await fetch("/api/students", { cache: "no-store" });
     if (res.ok) {
       const latest: Student[] = await res.json();
       setStudents(sortById(latest));
     }
 
-    // ✅ 4) pending 해제
-    setPendingIds((prev) => {
-      const next = new Set(prev);
-      updates.forEach((u) => next.delete(u.id));
-      return next;
-    });
+    // ✅ 다시 폴링 켜기
+    setIsMutating(false);
   };
 
   const saveStudent = async (id: string, updates: Partial<Student>) => {
     await bulkUpdate([{ id, ...updates }]);
   };
 
-  // 일괄 재실
   const resetAllToPresent = async () => {
     await bulkUpdate(
       students.map((s) => ({ id: s.id, status: "재실", reason: "" }))
     );
   };
 
-  // 일괄 허가
   const approveAll = async () => {
     await bulkUpdate(students.map((s) => ({ id: s.id, approved: true })));
   };
 
-  // 일괄 불허가
   const disapproveAll = async () => {
     await bulkUpdate(students.map((s) => ({ id: s.id, approved: false })));
   };
 
-  // 귀가/외출 제외 재실
   const resetAllExceptOut = async () => {
     await bulkUpdate(
       students
@@ -184,7 +166,6 @@ export default function TeacherPage() {
     router.push("/");
   };
 
-  // 인원 카드
   const total = students.length;
   const inClassOrMedia = students.filter(
     (s) => s.status === "재실" || s.status === "미디어스페이스"
@@ -380,19 +361,23 @@ export default function TeacherPage() {
                 <div className="text-sm font-semibold mb-1">
                   인원(교실, 미디어스페이스)
                 </div>
-                <div className="flex justify-between text-sm">
+                <div className="flex justify-between text-sm items-center">
                   <span>총원</span>
                   <span className="font-bold text-lg">{total}</span>
                 </div>
-                <div className="flex justify-between text-sm">
+                <div className="flex justify-between text-sm items-center">
                   <span>재실인원</span>
                   <span className="font-bold text-lg text-green-600">
                     {inClassOrMedia}
                   </span>
                 </div>
-                <div className="flex justify-between text-sm">
+                <div className="flex justify-between text-sm items-center">
                   <span>결원</span>
-                  <span className="font-bold text-lg text-red-500">
+                  <span
+                    className={`font-bold text-lg ${
+                      outClassOrMedia === 0 ? "text-gray-500" : "text-red-500"
+                    }`}
+                  >
                     {outClassOrMedia}
                   </span>
                 </div>
@@ -402,19 +387,23 @@ export default function TeacherPage() {
                 <div className="text-sm font-semibold mb-1">
                   인원(교내에 있는 학생)
                 </div>
-                <div className="flex justify-between text-sm">
+                <div className="flex justify-between text-sm items-center">
                   <span>총원</span>
                   <span className="font-bold text-lg">{total}</span>
                 </div>
-                <div className="flex justify-between text-sm">
+                <div className="flex justify-between text-sm items-center">
                   <span>교내에 있음</span>
                   <span className="font-bold text-lg text-green-600">
                     {inCampus}
                   </span>
                 </div>
-                <div className="flex justify-between text-sm">
+                <div className="flex justify-between text-sm items-center">
                   <span>교내에 없음</span>
-                  <span className="font-bold text-lg text-red-500">
+                  <span
+                    className={`font-bold text-lg ${
+                      outCampus === 0 ? "text-gray-500" : "text-red-500"
+                    }`}
+                  >
                     {outCampus}
                   </span>
                 </div>
@@ -430,7 +419,7 @@ export default function TeacherPage() {
 }
 
 /* ──────────────────────────────── */
-/* 스케줄러 탭 (ON/OFF 포함) */
+/* 스케줄러 탭 */
 /* ──────────────────────────────── */
 function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
   const [day, setDay] = useState<DayKey>("mon");
@@ -441,7 +430,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
   const [loading, setLoading] = useState(false);
   const [schedEnabled, setSchedEnabled] = useState(true);
 
-  // 스케줄러 상태 가져오기
+  // 스케줄러 ON/OFF 상태
   useEffect(() => {
     const loadState = async () => {
       const res = await fetch("/api/scheduler/state", { cache: "no-store" });
@@ -518,7 +507,9 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
   };
 
   const setAllNoChange = () => {
-    setRows((prev) => prev.map((r) => ({ ...r, status: "변경안함", reason: "" })));
+    setRows((prev) =>
+      prev.map((r) => ({ ...r, status: "변경안함", reason: "" }))
+    );
   };
 
   const fillFromCurrent = async () => {
@@ -572,7 +563,6 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
   return (
     <div className="bg-white border border-gray-300 rounded-md p-3 flex flex-col gap-3">
       <div className="flex flex-wrap gap-2 items-center">
-        {/* 요일 버튼 */}
         <div className="flex gap-1">
           {DAYS.map((d) => (
             <button
@@ -587,7 +577,6 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
           ))}
         </div>
 
-        {/* 시간 버튼 */}
         <div className="flex gap-1 ml-2">
           {TIME_SLOTS.map((t) => (
             <button
@@ -602,9 +591,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
           ))}
         </div>
 
-        {/* 오른쪽 버튼들 */}
         <div className="ml-auto flex gap-2 items-center">
-          {/* 스케줄러 on/off */}
           <button
             onClick={toggleScheduler}
             className={`px-3 py-1 text-sm rounded ${
