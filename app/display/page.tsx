@@ -132,7 +132,8 @@ export default function DisplayPage() {
     return () => clearInterval(t);
   }, []);
 
-  // 학생 데이터 5초마다 (원래 0.5초였던 곳)
+  // ✅ 학생 데이터 주기적으로 가져오기
+  //    여기에서 "오늘 처음이면 전원 재실로 PATCH" 하던 부분만 뺐다.
   useEffect(() => {
     let alive = true;
 
@@ -140,49 +141,18 @@ export default function DisplayPage() {
       const res = await fetch("/api/students", { cache: "no-store" });
       if (!res.ok) return;
       const data: Student[] = await res.json();
-
-      // 날짜별 자동 재실 로직 그대로
-      const today = new Date().toISOString().slice(0, 10);
-      const lastReset =
-        typeof window !== "undefined"
-          ? localStorage.getItem("student-last-reset")
-          : null;
-
-      if (lastReset !== today) {
-        const resetData = data.map((s) => ({
-          ...s,
-          status: "재실" as const,
-          reason: "",
-        }));
-        const sortedReset = sortById(resetData);
-        if (alive) setStudents(sortedReset);
-
-        await Promise.all(
-          data.map((s) =>
-            fetch("/api/students", {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ id: s.id, status: "재실", reason: "" }),
-            })
-          )
-        );
-
-        localStorage.setItem("student-last-reset", today);
-      } else {
-        const sorted = sortById(data);
-        if (alive) setStudents(sorted);
-      }
+      if (alive) setStudents(sortById(data));
     };
 
     load();
-    const t = setInterval(load, 2000); // 500 → 5000
+    const t = setInterval(load, 2000);
     return () => {
       alive = false;
       clearInterval(t);
     };
   }, []);
 
-  // 시간대 스케줄 자동 적용 (이건 30초로 놔둬도 돼)
+  // 시간대 스케줄 자동 적용
   useEffect(() => {
     const checkAndApply = async () => {
       const d = new Date();
@@ -219,7 +189,7 @@ export default function DisplayPage() {
     });
   };
 
-  // 일괄 재실
+  // 일괄 재실 (이건 남겨둠)
   const resetAllToPresent = async () => {
     const updated = students.map((s) => ({
       ...s,
@@ -237,9 +207,6 @@ export default function DisplayPage() {
         })
       )
     );
-
-    const today = new Date().toISOString().slice(0, 10);
-    localStorage.setItem("student-last-reset", today);
   };
 
   // 분류

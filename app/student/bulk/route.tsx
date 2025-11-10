@@ -8,7 +8,7 @@ import { students, ensureDailyReset } from "@/app/lib/data";
 export async function POST(req: NextRequest) {
   try {
     // ✅ 여기서도 하루 리셋 로직을 태워서 GET이랑 기준을 맞춘다
-    ensureDailyReset();
+    //ensureDailyReset();
 
     const body = await req.json();
     const updates = body.updates as Array<
