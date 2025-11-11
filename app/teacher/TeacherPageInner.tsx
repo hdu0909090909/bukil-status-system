@@ -1,3 +1,4 @@
+// app/teacher/TeacherPageInner.tsx
 "use client";
 
 import { useEffect, useState } from "react";
