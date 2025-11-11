@@ -1,19 +1,21 @@
 // app/api/students/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { students } from "@/app/lib/data";
+import { getStudents, saveStudents } from "@/app/lib/store";
 
-function getSorted() {
-  return [...students].sort((a, b) => Number(a.id) - Number(b.id));
+function sortById<T extends { id: string }>(arr: T[]) {
+  return [...arr].sort((a, b) => Number(a.id) - Number(b.id));
 }
 
 export async function GET() {
-  return NextResponse.json(getSorted(), { status: 200 });
+  const students = await getStudents();
+  return NextResponse.json(students, { status: 200 });
 }
 
 export async function PATCH(req: NextRequest) {
   const body = await req.json();
+  const students = await getStudents();
 
-  // 배열이면 여러 명
+  // 여러 명
   if (Array.isArray(body)) {
     for (const item of body) {
       const { id, ...updates } = item as { id: string; [key: string]: any };
@@ -22,13 +24,14 @@ export async function PATCH(req: NextRequest) {
       if (!target) continue;
       Object.assign(target, updates);
     }
+    await saveStudents(students);
     return NextResponse.json(
-      { ok: true, students: getSorted() },
+      { ok: true, students: sortById(students) },
       { status: 200 }
     );
   }
 
-  // 단일
+  // 한 명
   const { id, ...updates } = body as { id?: string; [key: string]: any };
   if (!id) {
     return NextResponse.json(
@@ -36,6 +39,7 @@ export async function PATCH(req: NextRequest) {
       { status: 400 }
     );
   }
+
   const target = students.find((s) => s.id === id);
   if (!target) {
     return NextResponse.json(
@@ -43,6 +47,12 @@ export async function PATCH(req: NextRequest) {
       { status: 404 }
     );
   }
+
   Object.assign(target, updates);
-  return NextResponse.json({ ok: true, student: target }, { status: 200 });
+  await saveStudents(students);
+
+  return NextResponse.json(
+    { ok: true, student: target },
+    { status: 200 }
+  );
 }
