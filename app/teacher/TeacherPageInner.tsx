@@ -1,7 +1,7 @@
 // app/teacher/TeacherPageInner.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 const STATUS_LIST = [
@@ -43,7 +43,7 @@ const TIME_SLOTS = ["8교시", "야간 1차시", "야간 2차시"] as const;
 type DayKey = (typeof DAYS)[number]["key"];
 type TimeSlot = (typeof TIME_SLOTS)[number];
 
-export default function TeacherPage() {
+export default function TeacherPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const userParam = searchParams.get("user") || "윤인하";
@@ -53,9 +53,16 @@ export default function TeacherPage() {
   const [tab, setTab] = useState<"status" | "schedule">("status");
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState<string>("");
+  const [message, setMessage] = useState("");
 
-  // 처음 로드
+  // ✅ 최근에 내가 만진 학생 id -> timestamp
+  const editedRef = useRef<Record<string, number>>({});
+
+  const markEdited = (id: string) => {
+    editedRef.current[id] = Date.now();
+  };
+
+  // 최초 로드
   useEffect(() => {
     const load = async () => {
       const res = await fetch("/api/students");
@@ -67,30 +74,30 @@ export default function TeacherPage() {
     load();
   }, []);
 
-  // 상태 탭일 때만 폴링
+  // 상태 탭일 때만 폴링, 내가 최근에 만진 애는 덮어쓰지 않음
   useEffect(() => {
     if (tab !== "status") return;
     let stop = false;
 
     const tick = async () => {
-      // 사유 입력 중이라고 해도 우리는 서버값을 보여줘야 하니까 그대로 덮어씀
       const res = await fetch("/api/students");
       if (!res.ok) return;
-      const data: Student[] = await res.json();
-      data.sort((a, b) => Number(a.id) - Number(b.id));
+      const server: Student[] = await res.json();
+      server.sort((a, b) => Number(a.id) - Number(b.id));
+
+      const now = Date.now();
+      const editedMap = editedRef.current;
+
       if (!stop) {
         setStudents((prev) => {
-          // 현재 화면에서만 수정하고 아직 저장 안 한 사유가 있을 수 있으니까
-          // 서버가 준 학생 목록에 "화면에만 있던 사유"를 우선해서 덮어주자
-          const localMap = new Map(prev.map((s) => [s.id, s]));
-          return data.map((s) => {
-            const local = localMap.get(s.id);
-            if (!local) return s;
-            // status/approved는 서버 걸로, reason은 화면 걸로 우선
-            return {
-              ...s,
-              reason: local.reason,
-            };
+          const prevMap = new Map(prev.map((s) => [s.id, s]));
+          return server.map((sv) => {
+            const editedAt = editedMap[sv.id];
+            // 6초 안에 내가 만졌으면 화면값 유지
+            if (editedAt && now - editedAt < 6000) {
+              return prevMap.get(sv.id) ?? sv;
+            }
+            return sv;
           });
         });
       }
@@ -104,26 +111,31 @@ export default function TeacherPage() {
     };
   }, [tab]);
 
-  // 공통 벌크 (상태/허가 쪽)
+  // 공통 벌크 업데이트 (상태/허가/일괄 버튼용)
   const bulkUpdate = async (
     items: Array<{ id: string } & Partial<Student>>
   ) => {
     // 화면 먼저
     setStudents((prev) => {
-      const map: Record<string, Student> = {};
-      prev.forEach((s) => {
-        map[s.id] = { ...s };
-      });
+      const map = new Map(prev.map((s) => [s.id, { ...s }]));
       for (const item of items) {
-        const target = map[item.id];
+        const target = map.get(item.id);
         if (target) {
           Object.assign(target, item);
         }
       }
-      return Object.values(map).sort((a, b) => Number(a.id) - Number(b.id));
+      return Array.from(map.values()).sort(
+        (a, b) => Number(a.id) - Number(b.id)
+      );
     });
 
-    // 서버
+    // 내가 만졌다고 표시 (폴링이 바로 안 덮어쓰게)
+    const now = Date.now();
+    for (const item of items) {
+      editedRef.current[item.id] = now;
+    }
+
+    // 서버에도 한번에
     await fetch("/api/students", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -131,13 +143,15 @@ export default function TeacherPage() {
     });
   };
 
-  // 상태 저장
+  // 단건 상태/허가 저장
   const saveStudent = async (id: string, updates: Partial<Student>) => {
+    markEdited(id);
     await bulkUpdate([{ id, ...updates }]);
   };
 
-  // ✅ 사유 저장 (이번에 추가한 메서드)
+  // ✅ 사유 저장
   const saveReason = async (stu: Student) => {
+    // 서버로 전송
     await fetch("/api/students", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -147,13 +161,16 @@ export default function TeacherPage() {
       }),
     });
 
+    // 최근에 만졌다 표시
+    markEdited(stu.id);
+
     setMessage(
       `${stu.name}(${stu.id}) 학생 사유가 "${stu.reason || "-"}"로 저장되었습니다.`
     );
     setTimeout(() => setMessage(""), 3000);
   };
 
-  // 일괄 버튼들
+  // 일괄 재실
   const resetAllToPresent = async () => {
     const payload = students.map((s) => ({
       id: s.id,
@@ -163,11 +180,13 @@ export default function TeacherPage() {
     await bulkUpdate(payload);
   };
 
+  // 일괄 허가
   const approveAll = async () => {
     const payload = students.map((s) => ({ id: s.id, approved: true }));
     await bulkUpdate(payload);
   };
 
+  // 일괄 불허가
   const disapproveAll = async () => {
     const payload = students.map((s) => ({ id: s.id, approved: false }));
     await bulkUpdate(payload);
@@ -290,14 +309,22 @@ export default function TeacherPage() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-100 sticky top-0 z-10">
                     <tr>
-                      <th className="px-2 py-2 w-20 text-left border-b">학번</th>
-                      <th className="px-2 py-2 w-28 text-left border-b">이름</th>
-                      <th className="px-2 py-2 w-40 text-left border-b">상태</th>
+                      <th className="px-2 py-2 w-20 text-left border-b">
+                        학번
+                      </th>
+                      <th className="px-2 py-2 w-28 text-left border-b">
+                        이름
+                      </th>
+                      <th className="px-2 py-2 w-40 text-left border-b">
+                        상태
+                      </th>
                       <th className="px-2 py-2 text-left border-b">사유</th>
                       <th className="px-2 py-2 w-28 text-left border-b">
                         사유 저장
                       </th>
-                      <th className="px-2 py-2 w-16 text-left border-b">허가</th>
+                      <th className="px-2 py-2 w-16 text-left border-b">
+                        허가
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -339,12 +366,14 @@ export default function TeacherPage() {
                               value={s.reason}
                               onChange={(e) => {
                                 const v = e.target.value;
-                                // 서버로는 안 보내고 화면에서만 변경
+                                // 화면에서만 먼저 바꿈
                                 setStudents((prev) =>
                                   prev.map((p) =>
                                     p.id === s.id ? { ...p, reason: v } : p
                                   )
                                 );
+                                // 이 학생은 내가 방금 만짐
+                                markEdited(s.id);
                               }}
                               className="border rounded px-1 py-[2px] text-sm w-full bg-white"
                               placeholder="여기에 사유 입력"
@@ -353,7 +382,7 @@ export default function TeacherPage() {
                           <td className="px-2 py-1">
                             <button
                               onClick={() => saveReason(s)}
-                              className="text-xs bg-orange-400 text-white px-3 py-[5px] rounded w-full"
+                              className="text-xs bg-orange-400 hover:bg-orange-500 text-white px-3 py-[5px] rounded w-full"
                             >
                               저장하기
                             </button>
@@ -436,7 +465,7 @@ export default function TeacherPage() {
 }
 
 /* ──────────────────────────────── */
-/* 스케줄러 탭 (기존 그대로) */
+/* 스케줄러 탭 그대로 */
 /* ──────────────────────────────── */
 function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
   const [day, setDay] = useState<DayKey>("mon");
