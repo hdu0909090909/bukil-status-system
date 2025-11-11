@@ -1,6 +1,6 @@
 // app/lib/store.ts
-import fs from "fs/promises";
-import path from "path";
+import fs from "node:fs/promises";
+import path from "node:path";
 
 export type Student = {
   id: string;
@@ -18,17 +18,28 @@ export type TeacherUser = {
   password: string;
 };
 
-type DataFileShape = {
-  students: Student[];
-  teacherUsers: TeacherUser[];
+export type SchedulerPlan = {
+  day: string;
+  slot: string;
+  items: Array<{
+    studentId: string;
+    name: string;
+    status: string;
+    reason: string;
+  }>;
 };
 
-// data 폴더에 json 하나 두고 그걸로 읽고쓰기
-const DATA_DIR = path.join(process.cwd(), "data");
-const DATA_FILE = path.join(DATA_DIR, "data.json");
+type FileShape = {
+  students: Student[];
+  teachers: TeacherUser[];
+  scheduler: Record<string, SchedulerPlan>;
+};
 
-// 너 원래 data.ts 에 있던 초기값을 여기에도 박아둔다
-const INITIAL_DATA: DataFileShape = {
+// 프로젝트 루트 기준으로 저장할 파일 하나 정해두기
+const DATA_FILE = path.join(process.cwd(), "data.json");
+
+// 최초 기본값
+const DEFAULT_DATA: FileShape = {
   students: [
     { id: "11115", name: "이도현", status: "재실", reason: "", approved: true, seatId: "11115", password: "12345678" },
     { id: "11130", name: "황도운", status: "재실", reason: "", approved: true, seatId: "11130", password: "12345678" },
@@ -61,53 +72,61 @@ const INITIAL_DATA: DataFileShape = {
     { id: "11109", name: "박경민", status: "재실", reason: "", approved: true, seatId: "11109", password: "12345678" },
     { id: "11113", name: "안준영", status: "재실", reason: "", approved: true, seatId: "11113", password: "12345678" },
   ],
-  teacherUsers: [
+  teachers: [
     { id: "윤인하", name: "윤인하 선생님", password: "admin" },
     { id: "이도현", name: "이도현 학생", password: "admin" },
     { id: "함주완", name: "함주완 학생", password: "admin" },
     { id: "최배겸", name: "최배겸 학생", password: "admin" },
   ],
+  scheduler: {},
 };
 
-async function ensureFile() {
+async function readFile(): Promise<FileShape> {
   try {
-    await fs.access(DATA_FILE);
+    const raw = await fs.readFile(DATA_FILE, "utf8");
+    const json = JSON.parse(raw) as FileShape;
+    // 필드 빠졌을 때 대비
+    return {
+      students: json.students ?? DEFAULT_DATA.students,
+      teachers: json.teachers ?? DEFAULT_DATA.teachers,
+      scheduler: json.scheduler ?? {},
+    };
   } catch {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    await fs.writeFile(
-      DATA_FILE,
-      JSON.stringify(INITIAL_DATA, null, 2),
-      "utf-8"
-    );
+    // 파일이 없으면 새로 만들어준다
+    await fs.writeFile(DATA_FILE, JSON.stringify(DEFAULT_DATA, null, 2), "utf8");
+    return DEFAULT_DATA;
   }
 }
 
 export async function getStudents(): Promise<Student[]> {
-  await ensureFile();
-  const raw = await fs.readFile(DATA_FILE, "utf-8");
-  const json = JSON.parse(raw) as DataFileShape;
-  return json.students ?? [];
+  const data = await readFile();
+  return data.students;
 }
 
 export async function saveStudents(students: Student[]) {
-  await ensureFile();
-  const raw = await fs.readFile(DATA_FILE, "utf-8");
-  const json = JSON.parse(raw) as DataFileShape;
-  json.students = students;
-  await fs.writeFile(DATA_FILE, JSON.stringify(json, null, 2), "utf-8");
+  const data = await readFile();
+  data.students = students;
+  await fs.writeFile(DATA_FILE, JSON.stringify(data, null, 2), "utf8");
 }
 
-export async function getTeacherUsers(): Promise<TeacherUser[]> {
-  await ensureFile();
-  const raw = await fs.readFile(DATA_FILE, "utf-8");
-  const json = JSON.parse(raw) as DataFileShape;
-  return json.teacherUsers ?? [];
+export async function getTeachers(): Promise<TeacherUser[]> {
+  const data = await readFile();
+  return data.teachers;
 }
 
-export async function saveTeacherUsers(teacherUsers: TeacherUser[]) {
-  await ensureFile();
-  const raw = await fs.readFile(DATA_FILE, "utf-8");
-  const json = JSON.parse(raw) as DataFileShape;
-  json.teacherUsers = teacherUsers;
-  await fs.writeFile(DATA_FILE, JSON.stringify(json, null, 2), "utf-8");
+export async function saveTeachers(teachers: TeacherUser[]) {
+  const data = await readFile();
+  data.teachers = teachers;
+  await fs.writeFile(DATA_FILE, JSON.stringify(data, null, 2), "utf8");
+}
+
+// 필요하면 스케줄러도 여기서 같이
+export async function getScheduler() {
+  const data = await readFile();
+  return data.scheduler;
+}
+export async function saveScheduler(scheduler: Record<string, SchedulerPlan>) {
+  const data = await readFile();
+  data.scheduler = scheduler;
+  await fs.writeFile(DATA_FILE, JSON.stringify(data, null, 2), "utf8");
 }
