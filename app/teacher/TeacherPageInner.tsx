@@ -1,7 +1,7 @@
 // app/teacher/TeacherPageInner.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 const STATUS_LIST = [
@@ -43,7 +43,7 @@ const TIME_SLOTS = ["8교시", "야간 1차시", "야간 2차시"] as const;
 type DayKey = (typeof DAYS)[number]["key"];
 type TimeSlot = (typeof TIME_SLOTS)[number];
 
-export default function TeacherPage() {
+export default function TeacherPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const userParam = searchParams.get("user") || "윤인하";
@@ -53,6 +53,9 @@ export default function TeacherPage() {
   const [tab, setTab] = useState<"status" | "schedule">("status");
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // 👇 내가 최근에 만진 학생 id -> timestamp
+  const editedRef = useRef<Record<string, number>>({});
 
   // 첫 로드
   useEffect(() => {
@@ -70,13 +73,33 @@ export default function TeacherPage() {
   useEffect(() => {
     if (tab !== "status") return;
     let stop = false;
+
     const tick = async () => {
       const res = await fetch("/api/students");
       if (!res.ok) return;
       const data: Student[] = await res.json();
       data.sort((a, b) => Number(a.id) - Number(b.id));
-      if (!stop) setStudents(data);
+
+      const now = Date.now();
+      const editedMap = editedRef.current;
+
+      if (!stop) {
+        // 👇 4초 안에 내가 만진 애는 서버값으로 덮어쓰지 말기
+        setStudents((prev) => {
+          const prevMap = new Map(prev.map((s) => [s.id, s]));
+          const merged = data.map((serverStu) => {
+            const touchedAt = editedMap[serverStu.id];
+            if (touchedAt && now - touchedAt < 4000) {
+              // 내 변경이 더 새로우니까 내 걸 유지
+              return prevMap.get(serverStu.id) ?? serverStu;
+            }
+            return serverStu;
+          });
+          return merged;
+        });
+      }
     };
+
     tick();
     const t = setInterval(tick, 3000);
     return () => {
@@ -85,11 +108,16 @@ export default function TeacherPage() {
     };
   }, [tab]);
 
+  // 👇 이걸로 표시해 두면 위 폴링에서 4초 동안은 안 덮어씀
+  const markEdited = (id: string) => {
+    editedRef.current[id] = Date.now();
+  };
+
   // 공통: 서버에 벌크로 보내기
   const bulkUpdate = async (
     items: Array<{ id: string } & Partial<Student>>
   ) => {
-    // 1) 먼저 화면에 즉시 반영
+    // 1) 화면 먼저 즉시 반영
     setStudents((prev) => {
       const map: Record<string, Student> = {};
       prev.forEach((s) => {
@@ -103,6 +131,9 @@ export default function TeacherPage() {
       }
       return Object.values(map).sort((a, b) => Number(a.id) - Number(b.id));
     });
+
+    // 1-1) 방금 만졌다고 표시
+    items.forEach((it) => markEdited(it.id));
 
     // 2) 서버에 한 번만 요청
     await fetch("/api/students", {
@@ -378,13 +409,13 @@ export default function TeacherPage() {
                   <span className="font-bold text-lg">{total}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span>재실인원</span>
+                  <span>교내에 있음</span>
                   <span className="font-bold text-lg text-green-600">
                     {inCampus}
                   </span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span>결원</span>
+                  <span>교내에 없음</span>
                   <span className="font-bold text-lg text-red-500">
                     {outCampus}
                   </span>
@@ -400,9 +431,7 @@ export default function TeacherPage() {
   );
 }
 
-/* ──────────────────────────────── */
-/* 스케줄러 탭 */
-/* ──────────────────────────────── */
+/* 스케줄러 탭은 네가 쓰던 거 유지 */
 function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
   const [day, setDay] = useState<DayKey>("mon");
   const [slot, setSlot] = useState<TimeSlot>("8교시");
@@ -577,7 +606,9 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
             <tr>
               <th className="px-2 py-2 w-20 text-left border-b">학번</th>
               <th className="px-2 py-2 w-24 text-left border-b">이름</th>
-              <th className="px-2 py-2 w-32 text-left border-b">이 시간 상태</th>
+              <th className="px-2 py-2 w-32 text-left border-b">
+                이 시간 상태
+              </th>
               <th className="px-2 py-2 text-left border-b">사유</th>
             </tr>
           </thead>
