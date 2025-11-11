@@ -65,11 +65,9 @@ const SEAT_POS: Record<string, { x: number; y: number }> = {
   "11113": { x: 340, y: 300 },
 };
 
-// 공통 정렬
 const sortById = <T extends { id: string }>(list: T[]) =>
   [...list].sort((a, b) => Number(a.id) - Number(b.id));
 
-// 상태 → 박스
 function statusToPlace(
   status: string
 ): "classroom" | "mediaspace" | "gone" | "etc" {
@@ -133,7 +131,7 @@ export default function DisplayPage() {
     return () => clearInterval(t);
   }, []);
 
-  // ✅ 학생 데이터 주기적으로 불러오기 (이제 여기서 전체 재실로 PATCH 안 함)
+  // ✅ 자동 전체 재실 없앰. 그냥 주기적으로 GET만.
   useEffect(() => {
     let alive = true;
 
@@ -147,14 +145,14 @@ export default function DisplayPage() {
     };
 
     load();
-    const t = setInterval(load, 2000); // 네가 쓰던 2초 폴링
+    const t = setInterval(load, 2000);
     return () => {
       alive = false;
       clearInterval(t);
     };
   }, []);
 
-  // 시간대 스케줄 자동 적용 (이건 네가 쓰던 그대로)
+  // 스케줄 자동 적용 (원래 있던 거)
   useEffect(() => {
     const checkAndApply = async () => {
       const d = new Date();
@@ -191,7 +189,7 @@ export default function DisplayPage() {
     });
   };
 
-  // 일괄 재실 (이건 버튼 눌렀을 때만 동작)
+  // 수동 일괄 재실
   const resetAllToPresent = async () => {
     const updated = students.map((s) => ({
       ...s,
@@ -225,7 +223,6 @@ export default function DisplayPage() {
     .filter((s) => statusToPlace(s.status) === "etc")
     .sort((a, b) => Number(a.id) - Number(b.id));
 
-  // 기타 묶기
   const etcByStatus: Record<string, Student[]> = {};
   for (const s of etcStudents) {
     if (!etcByStatus[s.status]) etcByStatus[s.status] = [];
@@ -233,7 +230,6 @@ export default function DisplayPage() {
   }
   const etcStatusKeys = Object.keys(etcByStatus);
 
-  // 인원 카드
   const totalCount = students.length;
   const inClassOrMedia = students.filter((s) => {
     const place = statusToPlace(s.status);
@@ -281,54 +277,49 @@ export default function DisplayPage() {
                 </tr>
               </thead>
               <tbody>
-                {students
-                  .slice()
-                  .sort((a, b) => Number(a.id) - Number(b.id))
-                  .map((s) => (
-                    <tr key={s.id} className="border-b last:border-b-0">
-                      <td className="px-2 py-1">{s.id}</td>
-                      <td className="px-2 py-1 truncate">{s.name}</td>
-                      <td className="px-2 py-1">
-                        <select
-                          value={s.status}
-                          onChange={(e) =>
-                            saveStudent(s.id, {
-                              status: e.target.value as Status,
-                            })
-                          }
-                          className="border rounded px-1 py-[1px] text-[11px] w-full"
-                        >
-                          {STATUS_LIST.map((st) => (
-                            <option key={st} value={st}>
-                              {st}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-2 py-1">
-                        <input
-                          value={s.reason}
-                          onChange={(e) =>
-                            saveStudent(s.id, { reason: e.target.value })
-                          }
-                          className="border rounded px-1 py-[1px] text-[11px] w-full"
-                          placeholder="사유 입력"
-                        />
-                      </td>
-                      <td className="px-2 py-1">
-                        <button
-                          disabled
-                          className={`text-[11px] px-2 py-[2px] rounded w-full ${
-                            s.approved
-                              ? "bg-green-500 text-white"
-                              : "bg-gray-300"
-                          }`}
-                        >
-                          {s.approved ? "O" : "X"}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                {students.map((s) => (
+                  <tr key={s.id} className="border-b last:border-b-0">
+                    <td className="px-2 py-1">{s.id}</td>
+                    <td className="px-2 py-1 truncate">{s.name}</td>
+                    <td className="px-2 py-1">
+                      <select
+                        value={s.status}
+                        onChange={(e) =>
+                          saveStudent(s.id, {
+                            status: e.target.value as Status,
+                          })
+                        }
+                        className="border rounded px-1 py-[1px] text-[11px] w-full"
+                      >
+                        {STATUS_LIST.map((st) => (
+                          <option key={st} value={st}>
+                            {st}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-2 py-1">
+                      <input
+                        value={s.reason}
+                        onChange={(e) =>
+                          saveStudent(s.id, { reason: e.target.value })
+                        }
+                        className="border rounded px-1 py-[1px] text-[11px] w-full"
+                        placeholder="사유 입력"
+                      />
+                    </td>
+                    <td className="px-2 py-1">
+                      <button
+                        disabled
+                        className={`text-[11px] px-2 py-[2px] rounded w-full ${
+                          s.approved ? "bg-green-500 text-white" : "bg-gray-300"
+                        }`}
+                      >
+                        {s.approved ? "O" : "X"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

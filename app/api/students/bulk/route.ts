@@ -2,8 +2,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { students } from "@/app/lib/data";
 
-// POST /api/students/bulk
-// { updates: [ { id, status?, reason?, approved? }, ... ] }
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -39,6 +37,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // 필요한 사람은 여기서 전체를 받아가게 할 수도 있음
     const sorted = [...students].sort((a, b) => Number(a.id) - Number(b.id));
     return NextResponse.json({ ok: true, students: sorted }, { status: 200 });
   } catch (err) {

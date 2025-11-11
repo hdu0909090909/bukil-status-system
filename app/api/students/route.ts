@@ -6,19 +6,14 @@ function getSortedStudents() {
   return [...students].sort((a, b) => Number(a.id) - Number(b.id));
 }
 
-// GET /api/students
 export async function GET() {
-  // ❌ 여기서 더 이상 ensureDailyReset() 안 부른다
   return NextResponse.json(getSortedStudents(), { status: 200 });
 }
 
-// PATCH /api/students
-// 1) [{...}, {...}] 벌크
-// 2) {...} 단건
 export async function PATCH(req: NextRequest) {
   const body = await req.json();
 
-  // 배열이면 벌크
+  // 배열이면 여러 명
   if (Array.isArray(body)) {
     for (const item of body) {
       const { id, ...updates } = item as { id: string; [key: string]: any };
@@ -28,10 +23,7 @@ export async function PATCH(req: NextRequest) {
       Object.assign(target, updates);
     }
     return NextResponse.json(
-      {
-        ok: true,
-        students: getSortedStudents(),
-      },
+      { ok: true, students: getSortedStudents() },
       { status: 200 }
     );
   }
@@ -55,11 +47,5 @@ export async function PATCH(req: NextRequest) {
 
   Object.assign(target, updates);
 
-  return NextResponse.json(
-    {
-      ok: true,
-      student: target,
-    },
-    { status: 200 }
-  );
+  return NextResponse.json({ ok: true, student: target }, { status: 200 });
 }

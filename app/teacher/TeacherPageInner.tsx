@@ -4,7 +4,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-/* 공통 상태 목록 */
 const STATUS_LIST = [
   "재실",
   "미디어스페이스",
@@ -58,10 +57,10 @@ export default function TeacherPageInner() {
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // 🔐 내가 최근에 건드린 시간 기록 (id -> timestamp)
+  // 내가 최근에 건드린 시각
   const editedRef = useRef<Record<string, number>>({});
 
-  // 최초 한번 전체 가져오기
+  // 최초 로드
   useEffect(() => {
     const load = async () => {
       const res = await fetch("/api/students", { cache: "no-store" });
@@ -72,7 +71,7 @@ export default function TeacherPageInner() {
     load();
   }, []);
 
-  // 상태 탭일 때만 폴링 + 10초 보호
+  // 상태 탭일 때만 폴링
   useEffect(() => {
     if (tab !== "status") return;
 
@@ -91,7 +90,7 @@ export default function TeacherPageInner() {
         const prevById = new Map(prev.map((s) => [s.id, s]));
         const merged = data.map((s) => {
           const editedAt = editedMap[s.id];
-          // 10초 안에 내가 만졌으면 서버값 무시
+          // 10초 안에 내가 만진 애는 서버 값 무시
           if (editedAt && now - editedAt < 10_000) {
             return prevById.get(s.id) ?? s;
           }
@@ -110,18 +109,17 @@ export default function TeacherPageInner() {
     };
   }, [tab]);
 
-  // 방금 만짐 표시
   const markEdited = (id: string) => {
     editedRef.current[id] = Date.now();
   };
 
-  // 서버와 동기화하는 공통 함수
+  // 여기서 서버 응답으로 바로 덮어쓰지 않는 게 포인트
   const bulkUpdate = async (
     updates: Array<
       Partial<Pick<Student, "status" | "reason" | "approved">> & { id: string }
     >
   ) => {
-    // 1) 화면 먼저 반영
+    // 1) 화면 먼저
     setStudents((prev) => {
       const m = new Map(prev.map((s) => [s.id, s]));
       for (const u of updates) {
@@ -133,55 +131,28 @@ export default function TeacherPageInner() {
       return sortById(Array.from(m.values()));
     });
 
-    // 2) 내가 만졌다고 기록
+    // 2) 내가 만졌다고 표시
     updates.forEach((u) => {
       if (u.id) markEdited(u.id);
     });
 
-    // 3) 서버로
-    const res = await fetch("/api/students/bulk", {
+    // 3) 서버로 보내긴 함
+    await fetch("/api/students/bulk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ updates }),
     });
 
-    // 4) 서버가 전체 students를 돌려줘도 10초 보호 한 번 더
-    if (res.ok) {
-      const data = await res.json();
-      if (data && Array.isArray(data.students)) {
-        const serverStudents: Student[] = data.students;
-        const now = Date.now();
-        const editedMap = editedRef.current;
-
-        setStudents((prev) => {
-          const merged = serverStudents.map((s) => {
-            const editedAt = editedMap[s.id];
-            if (editedAt && now - editedAt < 10_000) {
-              // 방금(10초 이내) 내가 만진 애는 내가 가진 값 유지
-              const local = prev.find((p) => p.id === s.id);
-              return local ?? s;
-            }
-            return s;
-          });
-          return sortById(merged);
-        });
-        return;
-      }
-    }
-
-    // 실패했으면 전체 다시
-    const res2 = await fetch("/api/students", { cache: "no-store" });
-    if (res2.ok) {
-      const latest: Student[] = await res2.json();
-      setStudents(sortById(latest));
-    }
+    // 4) 여기서 굳이 setStudents(...) 안 함.
+    //    3초마다 오는 폴링이 있고, editedRef가 10초 동안 보호해줄 거라
+    //    이 타이밍 레이스를 여기서 안 만든다.
   };
 
   const saveStudent = async (id: string, updates: Partial<Student>) => {
     await bulkUpdate([{ id, ...updates }]);
   };
 
-  // 일괄 버튼들
+  // 일괄 버튼
   const resetAllToPresent = async () => {
     await bulkUpdate(
       students.map((s) => ({ id: s.id, status: "재실", reason: "" }))
@@ -205,7 +176,7 @@ export default function TeacherPageInner() {
 
   const handleLogout = () => router.push("/");
 
-  // 인원 계산 (네가 쓰던 공식 그대로)
+  // 인원 카드
   const total = students.length;
   const inClassOrMedia = students.filter(
     (s) => s.status === "재실" || s.status === "미디어스페이스"
@@ -311,7 +282,7 @@ export default function TeacherPageInner() {
                     onClick={resetAllExceptOut}
                     className="px-3 py-1 text-xs bg-indigo-500 text-white rounded"
                   >
-                    귀가/외출자 제외 재실
+                    귀가/외출/호실 제외 재실
                   </button>
                 </div>
               </div>
@@ -320,9 +291,15 @@ export default function TeacherPageInner() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-100 sticky top-0 z-10">
                     <tr>
-                      <th className="px-2 py-2 w-20 text-left border-b">학번</th>
-                      <th className="px-2 py-2 w-28 text-left border-b">이름</th>
-                      <th className="px-2 py-2 w-40 text-left border-b">상태</th>
+                      <th className="px-2 py-2 w-20 text-left border-b">
+                        학번
+                      </th>
+                      <th className="px-2 py-2 w-28 text-left border-b">
+                        이름
+                      </th>
+                      <th className="px-2 py-2 w-40 text-left border-b">
+                        상태
+                      </th>
                       <th className="px-2 py-2 text-left border-b">사유</th>
                       <th className="px-2 py-2 w-16 text-left border-b">
                         허가
@@ -370,7 +347,6 @@ export default function TeacherPageInner() {
                               onChange={(e) => {
                                 const v = e.target.value;
                                 markEdited(s.id);
-                                // 화면엔 바로
                                 setStudents((prev) =>
                                   prev.map((p) =>
                                     p.id === s.id ? { ...p, reason: v } : p
@@ -378,7 +354,6 @@ export default function TeacherPageInner() {
                                 );
                               }}
                               onBlur={(e) => {
-                                // 포커스 빠질 때 서버 반영
                                 saveStudent(s.id, { reason: e.target.value });
                               }}
                               className="border rounded px-1 py-[2px] text-sm w-full"
@@ -471,9 +446,7 @@ export default function TeacherPageInner() {
   );
 }
 
-/* ──────────────────────────────── */
-/* 스케줄러 탭 (네가 쓰던거 거의 그대로) */
-/* ──────────────────────────────── */
+/* 스케줄러 탭 */
 function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
   const [day, setDay] = useState<DayKey>("mon");
   const [slot, setSlot] = useState<TimeSlot>("8교시");
@@ -483,7 +456,6 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
   const [loading, setLoading] = useState(false);
   const [schedEnabled, setSchedEnabled] = useState(true);
 
-  // 스케줄러 on/off 상태
   useEffect(() => {
     const loadState = async () => {
       const res = await fetch("/api/scheduler/state", { cache: "no-store" });
@@ -495,15 +467,12 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
     loadState();
   }, []);
 
-  // 특정 요일/차시 불러오기
   useEffect(() => {
     const load = async () => {
       setLoading(true);
-
       const res = await fetch(
         `/api/scheduler?day=${day}&slot=${encodeURIComponent(slot)}`
       );
-
       if (res.ok) {
         const data = await res.json();
         const items =
@@ -525,7 +494,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
         }
       }
 
-      // 스케줄 없으면 현재 학생 목록으로 채우기
+      // 없으면 학생 목록으로 채움
       const res2 = await fetch("/api/students", { cache: "no-store" });
       if (res2.ok) {
         const students: Student[] = await res2.json();
@@ -688,7 +657,9 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
             <tr>
               <th className="px-2 py-2 w-20 text-left border-b">학번</th>
               <th className="px-2 py-2 w-24 text-left border-b">이름</th>
-              <th className="px-2 py-2 w-32 text-left border-b">이 시간 상태</th>
+              <th className="px-2 py-2 w-32 text-left border-b">
+                이 시간 상태
+              </th>
               <th className="px-2 py-2 text-left border-b">사유</th>
             </tr>
           </thead>

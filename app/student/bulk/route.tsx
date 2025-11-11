@@ -1,15 +1,9 @@
 // app/api/students/bulk/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { students, ensureDailyReset } from "@/app/lib/data";
+import { students } from "@/app/lib/data";
 
-// 요청 형태:
-// POST /api/students/bulk
-// { updates: [ { id: "11101", status: "재실", approved: true, reason: "" }, ... ] }
 export async function POST(req: NextRequest) {
   try {
-    // ✅ 여기서도 하루 리셋 로직을 태워서 GET이랑 기준을 맞춘다
-    //ensureDailyReset();
-
     const body = await req.json();
     const updates = body.updates as Array<
       Partial<{
@@ -27,7 +21,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 메모리에 있는 students 한 번에 수정
     for (const u of updates) {
       if (!u.id) continue;
       const st = students.find((s) => s.id === u.id);
@@ -44,9 +37,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ✅ 프런트가 이걸로 바로 화면 덮어쓰게 전체를 돌려준다
+    // 필요한 사람은 여기서 전체를 받아가게 할 수도 있음
     const sorted = [...students].sort((a, b) => Number(a.id) - Number(b.id));
-
     return NextResponse.json({ ok: true, students: sorted }, { status: 200 });
   } catch (err) {
     console.error("bulk update error", err);
