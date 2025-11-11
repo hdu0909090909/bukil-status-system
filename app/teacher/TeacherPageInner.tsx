@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
+/* 공통 상태 목록 */
 const STATUS_LIST = [
   "재실",
   "미디어스페이스",
@@ -57,8 +58,11 @@ export default function TeacherPageInner() {
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // 방금 만진 학생 시간 기록
+  // 내가 건드린 시각
   const editedRef = useRef<Record<string, number>>({});
+
+  // 내가 "의도적으로 전체를 재실로" 한 시각 (이때는 무조건 덮어도 됨)
+  const lastForceResetRef = useRef<number>(0);
 
   // 최초 로드
   useEffect(() => {
@@ -71,7 +75,7 @@ export default function TeacherPageInner() {
     load();
   }, []);
 
-  // 폴링
+  // 상태 탭일 때만 폴링
   useEffect(() => {
     if (tab !== "status") return;
 
@@ -80,18 +84,42 @@ export default function TeacherPageInner() {
     const tick = async () => {
       const res = await fetch("/api/students", { cache: "no-store" });
       if (!res.ok) return;
-      const data: Student[] = await res.json();
+      const serverData: Student[] = await res.json();
       if (stop) return;
 
       const now = Date.now();
       const editedMap = editedRef.current;
+      const local = studentsRef.current; // 아래에서 ref로 잡을 거
+      const serverSorted = sortById(serverData);
 
+      // 🔴 1. 이 스냅샷이 "말이 안 되게 초기화돼" 있나 검사
+      // 기준: (1) 거의 전원이 재실이고 (2) 이유가 거의 비어 있고 (3) 우리가 방금 강제재실 버튼 누른 게 아님
+      const total = serverSorted.length;
+      const resetLikeCount = serverSorted.filter(
+        (s) => s.status === "재실" && (!s.reason || s.reason.trim() === "")
+      ).length;
+
+      const justForced =
+        now - lastForceResetRef.current < 5_000; // 5초 안에 내가 직접 일괄 재실한 경우
+
+      // 전원의 80% 이상이 "재실+이유없음" 이고 내가 방금 강제로 한 것도 아니면 이 스냅샷은 믿지 않는다
+      const looksLikeBadReset =
+        !justForced && total > 0 && resetLikeCount / total > 0.8;
+
+      if (looksLikeBadReset) {
+        // 그냥 무시
+        return;
+      }
+
+      // 🔴 2. 정상인 스냅샷이면 머지
+      const now2 = Date.now();
       setStudents((prev) => {
-        const prevMap = new Map(prev.map((s) => [s.id, s]));
-        const merged = data.map((s) => {
+        const prevById = new Map(prev.map((s) => [s.id, s]));
+        const merged = serverSorted.map((s) => {
           const editedAt = editedMap[s.id];
-          if (editedAt && now - editedAt < 10_000) {
-            return prevMap.get(s.id) ?? s;
+          // 10초 안에 내가 만진 애는 내 걸로
+          if (editedAt && now2 - editedAt < 10_000) {
+            return prevById.get(s.id) ?? s;
           }
           return s;
         });
@@ -99,42 +127,46 @@ export default function TeacherPageInner() {
       });
     };
 
+    // 현재 students 를 참조하려고 ref 로도 들고 있음
+    const studentsRef = { current: students };
+    // 위에서 참조할 수 있게 클로저 밖으로 빼기
+    (tick as any).studentsRef = studentsRef;
+
+    // 첫 한번
     tick();
     const t = setInterval(tick, 3000);
     return () => {
       stop = true;
       clearInterval(t);
     };
-  }, [tab]);
+  }, [tab, students]); // students도 넣어서 최신 ref를 쓰게
 
   const markEdited = (id: string) => {
     editedRef.current[id] = Date.now();
   };
 
-  // ✅ 응답으로 전체를 다시 세팅하지 않는 bulk
+  // 공통 bulk
   const bulkUpdate = async (
     updates: Array<
       Partial<Pick<Student, "status" | "reason" | "approved">> & { id: string }
     >
   ) => {
-    // 1) 화면 선반영
+    // 화면 먼저
     setStudents((prev) => {
-      const map = new Map(prev.map((s) => [s.id, s]));
+      const m = new Map(prev.map((s) => [s.id, s]));
       for (const u of updates) {
-        const old = map.get(u.id);
+        const old = m.get(u.id);
         if (old) {
-          map.set(u.id, { ...old, ...u });
+          m.set(u.id, { ...old, ...u });
         }
       }
-      return sortById([...map.values()]);
+      return sortById(Array.from(m.values()));
     });
 
-    // 2) 편집 표시
-    updates.forEach((u) => {
-      if (u.id) markEdited(u.id);
-    });
+    // 편집 표시
+    updates.forEach((u) => markEdited(u.id));
 
-    // 3) 서버에 보내기만
+    // 서버
     await fetch("/api/students/bulk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -146,8 +178,9 @@ export default function TeacherPageInner() {
     await bulkUpdate([{ id, ...updates }]);
   };
 
-  // 일괄 버튼
+  // 일괄 버튼들
   const resetAllToPresent = async () => {
+    lastForceResetRef.current = Date.now(); // 내가 일부러 초기화한 시각
     await bulkUpdate(
       students.map((s) => ({ id: s.id, status: "재실", reason: "" }))
     );
@@ -159,11 +192,14 @@ export default function TeacherPageInner() {
     await bulkUpdate(students.map((s) => ({ id: s.id, approved: false })));
   };
   const resetAllExceptOut = async () => {
+    lastForceResetRef.current = Date.now();
     await bulkUpdate(
       students
         .filter(
           (s) =>
-            s.status !== "귀가" && s.status !== "외출" && s.status !== "호실자습"
+            s.status !== "귀가" &&
+            s.status !== "외출" &&
+            s.status !== "호실자습"
         )
         .map((s) => ({ id: s.id, status: "재실", reason: "" }))
     );
@@ -171,7 +207,7 @@ export default function TeacherPageInner() {
 
   const handleLogout = () => router.push("/");
 
-  // 인원 카드
+  // 인원 카드 계산
   const total = students.length;
   const inClassOrMedia = students.filter(
     (s) => s.status === "재실" || s.status === "미디어스페이스"
@@ -378,6 +414,7 @@ export default function TeacherPageInner() {
               </div>
             </div>
 
+            {/* 인원 카드 */}
             <div className="flex gap-4">
               <div className="bg-white rounded-md shadow-sm px-4 py-4 flex-1 flex flex-col gap-2">
                 <div className="text-sm font-semibold mb-1">
@@ -440,7 +477,7 @@ export default function TeacherPageInner() {
   );
 }
 
-/* 스케줄러 탭은 너가 쓰던 거 그대로 */
+/* 스케줄러 탭은 네가 쓰던 거 그대로 */
 function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
   const [day, setDay] = useState<DayKey>("mon");
   const [slot, setSlot] = useState<TimeSlot>("8교시");
@@ -490,6 +527,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
         }
       }
 
+      // 없으면 학생 목록으로 채움
       const res2 = await fetch("/api/students", { cache: "no-store" });
       if (res2.ok) {
         const students: Student[] = await res2.json();
@@ -578,6 +616,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
   return (
     <div className="bg-white border border-gray-300 rounded-md p-3 flex flex-col gap-3">
       <div className="flex flex-wrap gap-2 items-center">
+        {/* 요일 버튼 */}
         <div className="flex gap-1">
           {DAYS.map((d) => (
             <button
@@ -592,6 +631,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
           ))}
         </div>
 
+        {/* 시간 버튼 */}
         <div className="flex gap-1 ml-2">
           {TIME_SLOTS.map((t) => (
             <button
@@ -606,6 +646,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
           ))}
         </div>
 
+        {/* 오른쪽 버튼들 */}
         <div className="ml-auto flex gap-2 items-center">
           <button
             onClick={toggleScheduler}
