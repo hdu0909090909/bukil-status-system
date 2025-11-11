@@ -1,32 +1,23 @@
 // app/api/scheduler/state/route.ts
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
-// ─────────────────────────────
-// 메모리에 스케줄러 on/off 보관
-// ─────────────────────────────
-const g = globalThis as unknown as {
-  __schedulerEnabled?: boolean;
-};
+// 기본은 켜짐
+let schedulerEnabled = true;
 
-if (typeof g.__schedulerEnabled === "undefined") {
-  // 처음엔 켜진 상태
-  g.__schedulerEnabled = true;
-}
-
-// GET: 현재 상태 조회
 export async function GET() {
-  return NextResponse.json({ enabled: g.__schedulerEnabled });
+  return NextResponse.json({ enabled: schedulerEnabled }, { status: 200 });
 }
 
-// POST: 상태 변경 { enabled: boolean }
-export async function POST(req: Request) {
-  const body = await req.json();
-  const enabled = Boolean(body.enabled);
-  g.__schedulerEnabled = enabled;
-  return NextResponse.json({ ok: true, enabled });
+export async function POST(req: NextRequest) {
+  const body = await req.json().catch(() => ({}));
+  if (typeof body.enabled === "boolean") {
+    schedulerEnabled = body.enabled;
+    return NextResponse.json({ ok: true, enabled: schedulerEnabled });
+  }
+  return NextResponse.json({ ok: false, message: "enabled 필요" }, { status: 400 });
 }
 
-// 다른 라우트에서 import해서 쓰려고 export
-export function getSchedulerEnabled() {
-  return g.__schedulerEnabled ?? true;
+// 다른 곳(예: /api/scheduler/apply)에서 쓰게 하려면 이걸 export 해두고 import 해도 됨
+export function isSchedulerEnabled() {
+  return schedulerEnabled;
 }
