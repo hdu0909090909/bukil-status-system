@@ -53,8 +53,9 @@ export default function TeacherPage() {
   const [tab, setTab] = useState<"status" | "schedule">("status");
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState<string>("");
 
-  // 첫 로드
+  // 처음 로드
   useEffect(() => {
     const load = async () => {
       const res = await fetch("/api/students");
@@ -66,17 +67,35 @@ export default function TeacherPage() {
     load();
   }, []);
 
-  // 상태 탭일 때만 폴링 (3초)
+  // 상태 탭일 때만 폴링
   useEffect(() => {
     if (tab !== "status") return;
     let stop = false;
+
     const tick = async () => {
+      // 사유 입력 중이라고 해도 우리는 서버값을 보여줘야 하니까 그대로 덮어씀
       const res = await fetch("/api/students");
       if (!res.ok) return;
       const data: Student[] = await res.json();
       data.sort((a, b) => Number(a.id) - Number(b.id));
-      if (!stop) setStudents(data);
+      if (!stop) {
+        setStudents((prev) => {
+          // 현재 화면에서만 수정하고 아직 저장 안 한 사유가 있을 수 있으니까
+          // 서버가 준 학생 목록에 "화면에만 있던 사유"를 우선해서 덮어주자
+          const localMap = new Map(prev.map((s) => [s.id, s]));
+          return data.map((s) => {
+            const local = localMap.get(s.id);
+            if (!local) return s;
+            // status/approved는 서버 걸로, reason은 화면 걸로 우선
+            return {
+              ...s,
+              reason: local.reason,
+            };
+          });
+        });
+      }
     };
+
     tick();
     const t = setInterval(tick, 3000);
     return () => {
@@ -85,11 +104,11 @@ export default function TeacherPage() {
     };
   }, [tab]);
 
-  // 공통: 서버에 벌크로 보내기
+  // 공통 벌크 (상태/허가 쪽)
   const bulkUpdate = async (
     items: Array<{ id: string } & Partial<Student>>
   ) => {
-    // 1) 먼저 화면에 즉시 반영
+    // 화면 먼저
     setStudents((prev) => {
       const map: Record<string, Student> = {};
       prev.forEach((s) => {
@@ -104,7 +123,7 @@ export default function TeacherPage() {
       return Object.values(map).sort((a, b) => Number(a.id) - Number(b.id));
     });
 
-    // 2) 서버에 한 번만 요청
+    // 서버
     await fetch("/api/students", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -112,12 +131,29 @@ export default function TeacherPage() {
     });
   };
 
-  // 단건 저장도 bulk 하나로 돌림
+  // 상태 저장
   const saveStudent = async (id: string, updates: Partial<Student>) => {
     await bulkUpdate([{ id, ...updates }]);
   };
 
-  // 일괄 재실
+  // ✅ 사유 저장 (이번에 추가한 메서드)
+  const saveReason = async (stu: Student) => {
+    await fetch("/api/students", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: stu.id,
+        reason: stu.reason,
+      }),
+    });
+
+    setMessage(
+      `${stu.name}(${stu.id}) 학생 사유가 "${stu.reason || "-"}"로 저장되었습니다.`
+    );
+    setTimeout(() => setMessage(""), 3000);
+  };
+
+  // 일괄 버튼들
   const resetAllToPresent = async () => {
     const payload = students.map((s) => ({
       id: s.id,
@@ -127,43 +163,29 @@ export default function TeacherPage() {
     await bulkUpdate(payload);
   };
 
-  // 일괄 허가
   const approveAll = async () => {
-    const payload = students.map((s) => ({
-      id: s.id,
-      approved: true,
-    }));
+    const payload = students.map((s) => ({ id: s.id, approved: true }));
     await bulkUpdate(payload);
   };
 
-  // 일괄 불허가
   const disapproveAll = async () => {
-    const payload = students.map((s) => ({
-      id: s.id,
-      approved: false,
-    }));
+    const payload = students.map((s) => ({ id: s.id, approved: false }));
     await bulkUpdate(payload);
   };
 
-  const handleLogout = () => {
-    router.push("/");
-  };
+  const handleLogout = () => router.push("/");
 
-  // 인원 카드 계산
+  // 인원 카드
   const total = students.length;
   const inClassOrMedia = students.filter(
     (s) => s.status === "재실" || s.status === "미디어스페이스"
   ).length;
   const outClassOrMedia = total - inClassOrMedia;
-
-  const inCampus = students.filter((s) => {
-    if (s.status === "귀가" || s.status === "외출") return false;
-    if (s.status === "호실자습") return false;
-    return true;
-  }).length;
+  const inCampus = students.filter(
+    (s) => !["귀가", "외출", "호실자습"].includes(s.status)
+  ).length;
   const outCampus = total - inCampus;
 
-  // 스케줄 적용 뒤 바로 상태 새로고침
   const refreshNow = async () => {
     const res = await fetch("/api/students");
     const data: Student[] = await res.json();
@@ -226,6 +248,13 @@ export default function TeacherPage() {
             </div>
           </div>
         </div>
+        {message && (
+          <div className="max-w-6xl mx-auto px-3 pb-2">
+            <div className="bg-blue-50 text-blue-700 text-sm px-3 py-2 rounded-md border border-blue-100">
+              {message}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 본문 */}
@@ -257,32 +286,24 @@ export default function TeacherPage() {
                 </div>
               </div>
 
-              <div className="max-h-[520px] overflow-y-auto border rounded">
+              <div className="max-h-[450px] overflow-y-auto border rounded">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-100 sticky top-0 z-10">
                     <tr>
-                      <th className="px-2 py-2 w-20 text-left border-b">
-                        학번
-                      </th>
-                      <th className="px-2 py-2 w-28 text-left border-b">
-                        이름
-                      </th>
-                      <th className="px-2 py-2 w-40 text-left border-b">
-                        상태
-                      </th>
+                      <th className="px-2 py-2 w-20 text-left border-b">학번</th>
+                      <th className="px-2 py-2 w-28 text-left border-b">이름</th>
+                      <th className="px-2 py-2 w-40 text-left border-b">상태</th>
                       <th className="px-2 py-2 text-left border-b">사유</th>
-                      <th className="px-2 py-2 w-16 text-left border-b">
-                        허가
+                      <th className="px-2 py-2 w-28 text-left border-b">
+                        사유 저장
                       </th>
+                      <th className="px-2 py-2 w-16 text-left border-b">허가</th>
                     </tr>
                   </thead>
                   <tbody>
                     {loading ? (
                       <tr>
-                        <td
-                          colSpan={5}
-                          className="px-2 py-4 text-center text-gray-400"
-                        >
+                        <td colSpan={6} className="px-2 py-4 text-center">
                           불러오는 중...
                         </td>
                       </tr>
@@ -316,12 +337,26 @@ export default function TeacherPage() {
                           <td className="px-2 py-1">
                             <input
                               value={s.reason}
-                              onChange={(e) =>
-                                saveStudent(s.id, { reason: e.target.value })
-                              }
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                // 서버로는 안 보내고 화면에서만 변경
+                                setStudents((prev) =>
+                                  prev.map((p) =>
+                                    p.id === s.id ? { ...p, reason: v } : p
+                                  )
+                                );
+                              }}
                               className="border rounded px-1 py-[2px] text-sm w-full bg-white"
                               placeholder="여기에 사유 입력"
                             />
+                          </td>
+                          <td className="px-2 py-1">
+                            <button
+                              onClick={() => saveReason(s)}
+                              className="text-xs bg-orange-400 text-white px-3 py-[5px] rounded w-full"
+                            >
+                              저장하기
+                            </button>
                           </td>
                           <td className="px-2 py-1">
                             <button
@@ -351,17 +386,17 @@ export default function TeacherPage() {
                 <div className="text-sm font-semibold mb-1">
                   인원(교실, 미디어스페이스)
                 </div>
-                <div className="flex justify-between text-sm">
+                <div className="flex justify-between text-sm items-center">
                   <span>총원</span>
                   <span className="font-bold text-lg">{total}</span>
                 </div>
-                <div className="flex justify-between text-sm">
+                <div className="flex justify-between text-sm items-center">
                   <span>재실인원</span>
                   <span className="font-bold text-lg text-green-600">
                     {inClassOrMedia}
                   </span>
                 </div>
-                <div className="flex justify-between text-sm">
+                <div className="flex justify-between text-sm items-center">
                   <span>결원</span>
                   <span className="font-bold text-lg text-red-500">
                     {outClassOrMedia}
@@ -373,18 +408,18 @@ export default function TeacherPage() {
                 <div className="text-sm font-semibold mb-1">
                   인원(교내에 있는 학생)
                 </div>
-                <div className="flex justify-between text-sm">
+                <div className="flex justify-between text-sm items-center">
                   <span>총원</span>
                   <span className="font-bold text-lg">{total}</span>
                 </div>
-                <div className="flex justify-between text-sm">
-                  <span>재실인원</span>
+                <div className="flex justify-between text-sm items-center">
+                  <span>교내에 있음</span>
                   <span className="font-bold text-lg text-green-600">
                     {inCampus}
                   </span>
                 </div>
-                <div className="flex justify-between text-sm">
-                  <span>결원</span>
+                <div className="flex justify-between text-sm items-center">
+                  <span>교내에 없음</span>
                   <span className="font-bold text-lg text-red-500">
                     {outCampus}
                   </span>
@@ -401,7 +436,7 @@ export default function TeacherPage() {
 }
 
 /* ──────────────────────────────── */
-/* 스케줄러 탭 */
+/* 스케줄러 탭 (기존 그대로) */
 /* ──────────────────────────────── */
 function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
   const [day, setDay] = useState<DayKey>("mon");
@@ -425,12 +460,13 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
 
       if (res.ok) {
         const data = await res.json();
-        const items = (data.items ?? []) as Array<{
-          studentId: string;
-          name: string;
-          status: string;
-          reason: string;
-        }>;
+        const items =
+          (data.items as Array<{
+            studentId: string;
+            name: string;
+            status: string;
+            reason: string;
+          }>) ?? [];
 
         if (items.length > 0) {
           setRows(sortById(items));
@@ -442,15 +478,16 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
       const res2 = await fetch("/api/students");
       if (res2.ok) {
         const students: Student[] = await res2.json();
-        const filled = students
-          .map((s) => ({
-            studentId: s.id,
-            name: s.name,
-            status: "변경안함",
-            reason: "",
-          }))
-          .sort((a, b) => Number(a.studentId) - Number(b.studentId));
-        setRows(filled);
+        setRows(
+          students
+            .map((s) => ({
+              studentId: s.id,
+              name: s.name,
+              status: "변경안함",
+              reason: "",
+            }))
+            .sort((a, b) => Number(a.studentId) - Number(b.studentId))
+        );
       } else {
         setRows([]);
       }
@@ -461,23 +498,24 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
     load();
   }, [day, slot]);
 
-  const fillFromCurrent = async () => {
-    const res = await fetch("/api/students");
-    const students: Student[] = await res.json();
-    const items = students
-      .map((s) => ({
-        studentId: s.id,
-        name: s.name,
-        status: s.status ?? "변경안함",
-        reason: s.reason ?? "",
-      }))
-      .sort((a, b) => Number(a.studentId) - Number(b.studentId));
-    setRows(items);
-  };
-
   const setAllNoChange = () => {
     setRows((prev) =>
       prev.map((r) => ({ ...r, status: "변경안함", reason: "" }))
+    );
+  };
+
+  const fillFromCurrent = async () => {
+    const res = await fetch("/api/students");
+    const students: Student[] = await res.json();
+    setRows(
+      students
+        .map((s) => ({
+          studentId: s.id,
+          name: s.name,
+          status: s.status ?? "변경안함",
+          reason: s.reason ?? "",
+        }))
+        .sort((a, b) => Number(a.studentId) - Number(b.studentId))
     );
   };
 
@@ -529,6 +567,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
             </button>
           ))}
         </div>
+
         <div className="flex gap-1 ml-2">
           {TIME_SLOTS.map((t) => (
             <button
@@ -543,7 +582,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
           ))}
         </div>
 
-        <div className="ml-auto flex gap-2">
+        <div className="ml-auto flex gap-2 items-center">
           <button
             onClick={setAllNoChange}
             className="px-3 py-1 text-sm bg-gray-200 rounded"
