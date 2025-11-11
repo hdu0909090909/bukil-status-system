@@ -24,13 +24,13 @@ type Status = (typeof STATUS_LIST)[number];
 type Student = {
   id: string;
   name: string;
-  status: string;
+  status: Status | string;
   reason: string;
   approved: boolean;
   seatId?: string;
 };
 
-// 자리 좌표
+// 자리 좌표 (네가 쓰던 거 그대로)
 const SEAT_POS: Record<string, { x: number; y: number }> = {
   "11115": { x: 40, y: 20 },
   "11130": { x: 140, y: 20 },
@@ -65,11 +65,9 @@ const SEAT_POS: Record<string, { x: number; y: number }> = {
   "11113": { x: 340, y: 300 },
 };
 
-// 공통 정렬
 const sortById = <T extends { id: string }>(list: T[]) =>
   [...list].sort((a, b) => Number(a.id) - Number(b.id));
 
-// 상태 → 박스
 function statusToPlace(
   status: string
 ): "classroom" | "mediaspace" | "gone" | "etc" {
@@ -79,7 +77,7 @@ function statusToPlace(
   return "etc";
 }
 
-// 요일
+// 요일/시간대 자동 스케줄은 그대로 둘게
 function getDayKeyByDate(
   d: Date
 ): "mon" | "tue" | "wed" | "thu" | "fri" | null {
@@ -99,13 +97,10 @@ function getDayKeyByDate(
       return null;
   }
 }
-
-// 시간대
 function getSlotByDate(
   d: Date
 ): "8교시" | "야간 1차시" | "야간 2차시" | null {
   const minutes = d.getHours() * 60 + d.getMinutes();
-
   if (minutes >= 16 * 60 + 50 && minutes < 18 * 60) return "8교시";
   if (minutes >= 19 * 60 + 10 && minutes < 21 * 60) return "야간 1차시";
   if (minutes >= 21 * 60 + 15 && minutes < 23 * 60 + 30) return "야간 2차시";
@@ -115,14 +110,10 @@ function getSlotByDate(
 export default function DisplayPage() {
   const [students, setStudents] = useState<Student[]>([]);
   const [now, setNow] = useState("");
+  const [saving, setSaving] = useState(false);
   const lastAppliedRef = useRef<string | null>(null);
 
-  // 새로 추가
-  const dirtyRef = useRef<Set<string>>(new Set());
-  const [saving, setSaving] = useState(false);
-  const [savedMessage, setSavedMessage] = useState("");
-
-  // 시간 표시
+  // 시계
   useEffect(() => {
     const tick = () => {
       const d = new Date();
@@ -134,35 +125,22 @@ export default function DisplayPage() {
       setNow(`${yyyy}-${mm}-${dd} ${hh}:${mi}`);
     };
     tick();
-    const t = setInterval(tick, 5000);
+    const t = setInterval(tick, 30_000);
     return () => clearInterval(t);
   }, []);
 
-  // 학생 데이터 폴링
+  // ★ 첫 로드 한 번만
   useEffect(() => {
-    let alive = true;
-
     const load = async () => {
-      // 저장 안 된 변경이 있으면 폴링으로 덮어쓰지 말자
-      if (dirtyRef.current.size > 0) return;
-
       const res = await fetch("/api/students", { cache: "no-store" });
       if (!res.ok) return;
       const data: Student[] = await res.json();
-
-      const sorted = sortById(data);
-      if (alive) setStudents(sorted);
+      setStudents(sortById(data));
     };
-
     load();
-    const t = setInterval(load, 2000);
-    return () => {
-      alive = false;
-      clearInterval(t);
-    };
   }, []);
 
-  // 시간대 스케줄 자동 적용
+  // ★ 시간대 스케줄 적용은 그대로 (30초 간격)
   useEffect(() => {
     const checkAndApply = async () => {
       const d = new Date();
@@ -180,6 +158,13 @@ export default function DisplayPage() {
       });
 
       lastAppliedRef.current = key;
+
+      // 적용했으니까 한번 다시 불러와서 화면 반영
+      const res = await fetch("/api/students", { cache: "no-store" });
+      if (res.ok) {
+        const data: Student[] = await res.json();
+        setStudents(sortById(data));
+      }
     };
 
     checkAndApply();
@@ -187,63 +172,51 @@ export default function DisplayPage() {
     return () => clearInterval(t);
   }, []);
 
-  // 로컬에서 값 바꿀 때마다 dirty 표시
-  const markDirty = (id: string) => {
-    dirtyRef.current.add(id);
+  // 디스플레이에서 수정(로컬만)
+  const updateLocalStudent = (id: string, updates: Partial<Student>) => {
+    setStudents((prev) =>
+      sortById(prev.map((s) => (s.id === id ? { ...s, ...updates } : s)))
+    );
   };
 
-  // 저장 버튼 누르면 호출
-  const saveAllDirty = async () => {
-    const dirtyIds = Array.from(dirtyRef.current);
-    if (dirtyIds.length === 0) return;
+  // 일괄 재실 (로컬)
+  const resetAllToPresentLocal = () => {
+    setStudents((prev) =>
+      sortById(prev.map((s) => ({ ...s, status: "재실", reason: "" })))
+    );
+  };
 
-    const dirtyStudents = students.filter((s) => dirtyIds.includes(s.id));
-
+  // 저장 버튼 누를 때만 서버에 반영
+  const handleSaveAll = async () => {
     setSaving(true);
     try {
       await fetch("/api/students", {
         method: "PATCH",
-       headers: { "Content-Type": "application/json" },
-       body: JSON.stringify(
-         dirtyStudents.map((s) => ({
-           id: s.id,
-              status: s.status,
-             reason: s.reason,
-              approved: s.approved,
-            }))
-           ),
-        });
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          students.map((s) => ({
+            id: s.id,
+            status: s.status,
+            reason: s.reason,
+            approved: s.approved,
+          }))
+        ),
+    });
 
+      alert("저장되었습니다.");
 
-      dirtyRef.current.clear();
-      setSavedMessage("저장되었습니다 ✅");
-      setTimeout(() => setSavedMessage(""), 2000);
-    } catch (e) {
-      console.error("디스플레이 저장 실패", e);
-      setSavedMessage("저장 실패 ❌");
-      setTimeout(() => setSavedMessage(""), 2000);
+      // 저장 후 서버 기준 다시 불러오기
+      const res = await fetch("/api/students", { cache: "no-store" });
+      if (res.ok) {
+        const data: Student[] = await res.json();
+        setStudents(sortById(data));
+      }
+    } catch (err) {
+      console.error(err);
+      alert("저장 중 오류가 발생했습니다.");
     } finally {
       setSaving(false);
     }
-  };
-
-  // 디스플레이에서 수정 (로컬만)
-  const updateStudentLocal = (id: string, updates: Partial<Student>) => {
-    setStudents((prev) =>
-      sortById(prev.map((s) => (s.id === id ? { ...s, ...updates } : s)))
-    );
-    markDirty(id);
-  };
-
-  // 일괄 재실
-  const resetAllToPresent = () => {
-    setStudents((prev) => {
-      const updated = prev.map((s) => {
-        dirtyRef.current.add(s.id);
-        return { ...s, status: "재실", reason: "" };
-      });
-      return sortById(updated);
-    });
   };
 
   // 분류
@@ -260,7 +233,6 @@ export default function DisplayPage() {
     .filter((s) => statusToPlace(s.status) === "etc")
     .sort((a, b) => Number(a.id) - Number(b.id));
 
-  // 기타 묶기
   const etcByStatus: Record<string, Student[]> = {};
   for (const s of etcStudents) {
     if (!etcByStatus[s.status]) etcByStatus[s.status] = [];
@@ -268,7 +240,6 @@ export default function DisplayPage() {
   }
   const etcStatusKeys = Object.keys(etcByStatus);
 
-  // 인원
   const totalCount = students.length;
   const inClassOrMedia = students.filter((s) => {
     const place = statusToPlace(s.status);
@@ -295,28 +266,21 @@ export default function DisplayPage() {
       <div className="flex gap-4 flex-1 min-h-0">
         {/* 왼쪽 표 */}
         <div className="w-[460px] border-2 border-black rounded-md flex flex-col min-h-0">
-          <div className="flex items-center justify-between bg-gray-100 px-3 py-2 font-bold border-b border-black">
+          <div className="flex items-center justify-between bg-gray-100 px-3 py-2 font-bold border-b border-black gap-2">
             <span>현재 상태</span>
-            <div className="flex items-center gap-2">
-              {saving ? (
-                <span className="text-sm text-gray-500">저장 중...</span>
-              ) : savedMessage ? (
-                <span className="text-sm text-green-600">{savedMessage}</span>
-              ) : null}
+            <div className="flex gap-2">
               <button
-                onClick={saveAllDirty}
-                disabled={saving || dirtyRef.current.size === 0}
+                onClick={handleSaveAll}
+                disabled={saving}
                 className={`text-xs px-3 py-1 rounded ${
-                  saving || dirtyRef.current.size === 0
-                    ? "bg-gray-300 text-gray-600 cursor-not-allowed"
-                    : "bg-blue-500 text-white hover:bg-blue-600"
-                }`}
+                  saving ? "bg-gray-400" : "bg-blue-500 hover:bg-blue-600"
+                } text-white`}
               >
-                저장
+                {saving ? "저장중..." : "저장"}
               </button>
               <button
-                onClick={resetAllToPresent}
-                className="text-xs bg-indigo-500 text-white px-2 py-1 rounded"
+                onClick={resetAllToPresentLocal}
+                className="text-xs bg-indigo-500 hover:bg-indigo-600 text-white px-2 py-1 rounded"
               >
                 일괄 재실
               </button>
@@ -345,11 +309,11 @@ export default function DisplayPage() {
                         <select
                           value={s.status}
                           onChange={(e) =>
-                            updateStudentLocal(s.id, {
+                            updateLocalStudent(s.id, {
                               status: e.target.value as Status,
                             })
                           }
-                          className="border rounded px-1 py-[1px] text-[11px] w-full bg-white"
+                          className="border rounded px-1 py-[1px] text-[11px] w-full"
                         >
                           {STATUS_LIST.map((st) => (
                             <option key={st} value={st}>
@@ -362,23 +326,23 @@ export default function DisplayPage() {
                         <input
                           value={s.reason}
                           onChange={(e) =>
-                            updateStudentLocal(s.id, { reason: e.target.value })
+                            updateLocalStudent(s.id, { reason: e.target.value })
                           }
-                          className="border rounded px-1 py-[1px] text-[11px] w-full bg-white"
+                          className="border rounded px-1 py-[1px] text-[11px] w-full"
                           placeholder="사유 입력"
                         />
                       </td>
                       <td className="px-2 py-1">
                         <button
                           onClick={() =>
-                            updateStudentLocal(s.id, {
+                            updateLocalStudent(s.id, {
                               approved: !s.approved,
                             })
                           }
                           className={`text-[11px] px-2 py-[2px] rounded w-full ${
                             s.approved
                               ? "bg-green-500 text-white"
-                              : "bg-gray-300 text-gray-800"
+                              : "bg-gray-300"
                           }`}
                         >
                           {s.approved ? "O" : "X"}
@@ -391,7 +355,7 @@ export default function DisplayPage() {
           </div>
         </div>
 
-        {/* 오른쪽 전체 */}
+        {/* 오른쪽 전체 (네가 쓰던 레이아웃 그대로) */}
         <div className="flex-1 flex flex-col gap-4 min-h-0">
           {/* 위쪽: 교실 + 오른쪽 묶음 */}
           <div className="flex gap-4 min-h-[360px]">
