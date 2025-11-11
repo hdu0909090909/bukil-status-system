@@ -1,4 +1,3 @@
-// app/display/page.tsx
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -14,7 +13,7 @@ const STATUS_LIST = [
   "방과후수업",
   "동아리 활동",
   "교내활동",
-  "보건실 요양",
+  "화장실",
   "상담",
   "기타",
 ] as const;
@@ -30,7 +29,7 @@ type Student = {
   seatId?: string;
 };
 
-// 좌표
+// 자리 좌표
 const SEAT_POS: Record<string, { x: number; y: number }> = {
   "11115": { x: 40, y: 20 },
   "11130": { x: 140, y: 20 },
@@ -60,6 +59,7 @@ const SEAT_POS: Record<string, { x: number; y: number }> = {
   "11116": { x: 440, y: 230 },
 
   "11104": { x: 40, y: 300 },
+  "11122": { x: 140, y: 300 },
   "11109": { x: 240, y: 300 },
   "11113": { x: 340, y: 300 },
 };
@@ -76,10 +76,44 @@ function statusToPlace(
   return "etc";
 }
 
+// (있던 스케줄 자동 적용용) 요일
+function getDayKeyByDate(
+  d: Date
+): "mon" | "tue" | "wed" | "thu" | "fri" | null {
+  const day = d.getDay();
+  switch (day) {
+    case 1:
+      return "mon";
+    case 2:
+      return "tue";
+    case 3:
+      return "wed";
+    case 4:
+      return "thu";
+    case 5:
+      return "fri";
+    default:
+      return null;
+  }
+}
+
+// 시간대
+function getSlotByDate(
+  d: Date
+): "8교시" | "야간 1차시" | "야간 2차시" | null {
+  const minutes = d.getHours() * 60 + d.getMinutes();
+  if (minutes >= 16 * 60 + 50 && minutes < 18 * 60) return "8교시";
+  if (minutes >= 19 * 60 + 10 && minutes < 21 * 60) return "야간 1차시";
+  if (minutes >= 21 * 60 + 15 && minutes < 23 * 60 + 30) return "야간 2차시";
+  return null;
+}
+
 export default function DisplayPage() {
   const [students, setStudents] = useState<Student[]>([]);
   const [now, setNow] = useState("");
   const lastAppliedRef = useRef<string | null>(null);
+
+  // ↑ 여기까지는 네가 쓰던거 그대로
 
   // 시계
   useEffect(() => {
@@ -97,18 +131,16 @@ export default function DisplayPage() {
     return () => clearInterval(t);
   }, []);
 
-  // 학생 목록 불러오기 (3초마다)
+  // 👇 학생 데이터: **읽기만** 3초마다
   useEffect(() => {
     let alive = true;
 
     const load = async () => {
-      // ✅ 캐시 무효화를 위해 ts 쿼리 추가
-      const res = await fetch(`/api/students?ts=${Date.now()}`, {
-        cache: "no-store",
-      });
+      const res = await fetch("/api/students", { cache: "no-store" });
       if (!res.ok) return;
       const data: Student[] = await res.json();
-      if (alive) setStudents(sortById(data));
+      if (!alive) return;
+      setStudents(sortById(data));
     };
 
     load();
@@ -119,11 +151,38 @@ export default function DisplayPage() {
     };
   }, []);
 
-  // 학생 개별 수정
+  // 스케줄 자동 적용은 있던거 유지
+  useEffect(() => {
+    const checkAndApply = async () => {
+      const d = new Date();
+      const dayKey = getDayKeyByDate(d);
+      const slot = getSlotByDate(d);
+      if (!dayKey || !slot) return;
+
+      const key = `${dayKey}|${slot}`;
+      if (lastAppliedRef.current === key) return;
+
+      await fetch("/api/scheduler/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ day: dayKey, slot }),
+      });
+
+      lastAppliedRef.current = key;
+    };
+
+    checkAndApply();
+    const t = setInterval(checkAndApply, 30_000);
+    return () => clearInterval(t);
+  }, []);
+
+  // 디스플레이에서 직접 수정할 때만 서버에 씀
   const saveStudent = async (id: string, updates: Partial<Student>) => {
+    // 화면 먼저
     setStudents((prev) =>
       sortById(prev.map((s) => (s.id === id ? { ...s, ...updates } : s)))
     );
+    // 서버
     await fetch("/api/students", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -140,6 +199,7 @@ export default function DisplayPage() {
     }));
     setStudents(sortById(updated));
 
+    // 서버도 한 명씩 (너가 쓰던 방식 유지)
     await Promise.all(
       students.map((s) =>
         fetch("/api/students", {
@@ -151,6 +211,7 @@ export default function DisplayPage() {
     );
   };
 
+  // 분류
   const classroomStudents = students.filter(
     (s) => statusToPlace(s.status) === "classroom" && s.seatId
   );
@@ -266,8 +327,9 @@ export default function DisplayPage() {
           </div>
         </div>
 
-        {/* 오른쪽 */}
+        {/* 오른쪽 전체 */}
         <div className="flex-1 flex flex-col gap-4 min-h-0">
+          {/* 위쪽: 교실 + 오른쪽 묶음 */}
           <div className="flex gap-4 min-h-[360px]">
             {/* 교실 */}
             <div className="relative border-2 border-black w-[650px] h-[420px] flex flex-col">
@@ -291,8 +353,9 @@ export default function DisplayPage() {
               </div>
             </div>
 
-            {/* 오른쪽 묶음 */}
+            {/* 오른쪽: 미디어/귀가 + 인원 */}
             <div className="flex-1 flex gap-3 min-h-0 h-[420px]">
+              {/* 왼쪽 세로: 미디어 + 귀가 */}
               <div className="w-[360px] flex flex-col gap-3 h-full min-h-0">
                 {/* 미디어스페이스 */}
                 <div className="border-2 border-black flex-1 flex flex-col min-h-0">
@@ -329,7 +392,7 @@ export default function DisplayPage() {
                 </div>
               </div>
 
-              {/* 인원 카드 */}
+              {/* 오른쪽: 인원 카드 2개 */}
               <div className="flex-1 flex flex-col gap-3 h-full min-h-0">
                 <div className="bg-white border border-gray-300 rounded-md px-3 py-3 flex-1 flex flex-col">
                   <div className="text-base font-semibold mb-3 text-center">
@@ -409,9 +472,7 @@ export default function DisplayPage() {
                             )}
                             <div
                               className={`text-[10px] ${
-                                s.approved
-                                  ? "text-blue-600"
-                                  : "text-red-500"
+                                s.approved ? "text-blue-600" : "text-red-500"
                               }`}
                             >
                               {s.approved ? "허가됨" : "미허가"}
