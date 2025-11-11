@@ -77,28 +77,18 @@ function statusToPlace(
   return "etc";
 }
 
-// 요일
+// (있던 스케줄 자동 적용 유지)
 function getDayKeyByDate(
   d: Date
 ): "mon" | "tue" | "wed" | "thu" | "fri" | null {
   const day = d.getDay();
-  switch (day) {
-    case 1:
-      return "mon";
-    case 2:
-      return "tue";
-    case 3:
-      return "wed";
-    case 4:
-      return "thu";
-    case 5:
-      return "fri";
-    default:
-      return null;
-  }
+  if (day === 1) return "mon";
+  if (day === 2) return "tue";
+  if (day === 3) return "wed";
+  if (day === 4) return "thu";
+  if (day === 5) return "fri";
+  return null;
 }
-
-// 시간대
 function getSlotByDate(
   d: Date
 ): "8교시" | "야간 1차시" | "야간 2차시" | null {
@@ -114,6 +104,7 @@ export default function DisplayPage() {
   const [students, setStudents] = useState<Student[]>([]);
   const [now, setNow] = useState("");
   const lastAppliedRef = useRef<string | null>(null);
+  const editedRef = useRef<Record<string, number>>({});
 
   // 시간 표시
   useEffect(() => {
@@ -131,7 +122,7 @@ export default function DisplayPage() {
     return () => clearInterval(t);
   }, []);
 
-  // ✅ 자동 전체 재실 없앰. 그냥 주기적으로 GET만.
+  // 학생 데이터 2초마다
   useEffect(() => {
     let alive = true;
 
@@ -139,9 +130,21 @@ export default function DisplayPage() {
       const res = await fetch("/api/students", { cache: "no-store" });
       if (!res.ok) return;
       const data: Student[] = await res.json();
-      if (alive) {
-        setStudents(sortById(data));
-      }
+      if (!alive) return;
+
+      const now = Date.now();
+      const editedMap = editedRef.current;
+      setStudents((prev) => {
+        const prevMap = new Map(prev.map((s) => [s.id, s]));
+        const merged = data.map((s) => {
+          const editedAt = editedMap[s.id];
+          if (editedAt && now - editedAt < 10_000) {
+            return prevMap.get(s.id) ?? s;
+          }
+          return s;
+        });
+        return sortById(merged);
+      });
     };
 
     load();
@@ -152,7 +155,7 @@ export default function DisplayPage() {
     };
   }, []);
 
-  // 스케줄 자동 적용 (원래 있던 거)
+  // 스케줄 자동 적용 (그대로)
   useEffect(() => {
     const checkAndApply = async () => {
       const d = new Date();
@@ -177,19 +180,28 @@ export default function DisplayPage() {
     return () => clearInterval(t);
   }, []);
 
-  // 디스플레이에서 직접 수정
+  const markEdited = (id: string) => {
+    editedRef.current[id] = Date.now();
+  };
+
+  // 디스플레이에서 수정
   const saveStudent = async (id: string, updates: Partial<Student>) => {
+    // 화면 먼저
     setStudents((prev) =>
       sortById(prev.map((s) => (s.id === id ? { ...s, ...updates } : s)))
     );
-    await fetch("/api/students", {
-      method: "PATCH",
+    markEdited(id);
+
+    // 서버에 단건 bulk로 보내기
+    await fetch("/api/students/bulk", {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, ...updates }),
+      body: JSON.stringify({ updates: [{ id, ...updates }] }),
     });
+    // 여기서 굳이 다시 set 안 해도 위 2초 폴링이 알아서 서버 값 가져감
   };
 
-  // 수동 일괄 재실
+  // 일괄 재실
   const resetAllToPresent = async () => {
     const updated = students.map((s) => ({
       ...s,
@@ -197,16 +209,23 @@ export default function DisplayPage() {
       reason: "",
     }));
     setStudents(sortById(updated));
+    const now = Date.now();
+    const editedMap = editedRef.current;
+    for (const s of students) {
+      editedMap[s.id] = now;
+    }
 
-    await Promise.all(
-      students.map((s) =>
-        fetch("/api/students", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: s.id, status: "재실", reason: "" }),
-        })
-      )
-    );
+    await fetch("/api/students/bulk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        updates: students.map((s) => ({
+          id: s.id,
+          status: "재실",
+          reason: "",
+        })),
+      }),
+    });
   };
 
   // 분류
@@ -230,13 +249,13 @@ export default function DisplayPage() {
   }
   const etcStatusKeys = Object.keys(etcByStatus);
 
+  // 인원
   const totalCount = students.length;
   const inClassOrMedia = students.filter((s) => {
     const place = statusToPlace(s.status);
     return place === "classroom" || place === "mediaspace";
   }).length;
   const outClassOrMedia = totalCount - inClassOrMedia;
-
   const inCampus = students.filter((s) => {
     const place = statusToPlace(s.status);
     if (place === "gone") return false;
@@ -277,49 +296,52 @@ export default function DisplayPage() {
                 </tr>
               </thead>
               <tbody>
-                {students.map((s) => (
-                  <tr key={s.id} className="border-b last:border-b-0">
-                    <td className="px-2 py-1">{s.id}</td>
-                    <td className="px-2 py-1 truncate">{s.name}</td>
-                    <td className="px-2 py-1">
-                      <select
-                        value={s.status}
-                        onChange={(e) =>
-                          saveStudent(s.id, {
-                            status: e.target.value as Status,
-                          })
-                        }
-                        className="border rounded px-1 py-[1px] text-[11px] w-full"
-                      >
-                        {STATUS_LIST.map((st) => (
-                          <option key={st} value={st}>
-                            {st}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="px-2 py-1">
-                      <input
-                        value={s.reason}
-                        onChange={(e) =>
-                          saveStudent(s.id, { reason: e.target.value })
-                        }
-                        className="border rounded px-1 py-[1px] text-[11px] w-full"
-                        placeholder="사유 입력"
-                      />
-                    </td>
-                    <td className="px-2 py-1">
-                      <button
-                        disabled
-                        className={`text-[11px] px-2 py-[2px] rounded w-full ${
-                          s.approved ? "bg-green-500 text-white" : "bg-gray-300"
-                        }`}
-                      >
-                        {s.approved ? "O" : "X"}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {students
+                  .slice()
+                  .sort((a, b) => Number(a.id) - Number(b.id))
+                  .map((s) => (
+                    <tr key={s.id} className="border-b last:border-b-0">
+                      <td className="px-2 py-1">{s.id}</td>
+                      <td className="px-2 py-1 truncate">{s.name}</td>
+                      <td className="px-2 py-1">
+                        <select
+                          value={s.status}
+                          onChange={(e) =>
+                            saveStudent(s.id, {
+                              status: e.target.value as Status,
+                            })
+                          }
+                          className="border rounded px-1 py-[1px] text-[11px] w-full"
+                        >
+                          {STATUS_LIST.map((st) => (
+                            <option key={st} value={st}>
+                              {st}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="px-2 py-1">
+                        <input
+                          value={s.reason}
+                          onChange={(e) =>
+                            saveStudent(s.id, { reason: e.target.value })
+                          }
+                          className="border rounded px-1 py-[1px] text-[11px] w-full"
+                          placeholder="사유 입력"
+                        />
+                      </td>
+                      <td className="px-2 py-1">
+                        <button
+                          disabled
+                          className={`text-[11px] px-2 py-[2px] rounded w-full ${
+                            s.approved ? "bg-green-500 text-white" : "bg-gray-300"
+                          }`}
+                        >
+                          {s.approved ? "O" : "X"}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
               </tbody>
             </table>
           </div>

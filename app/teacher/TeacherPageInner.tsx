@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
+/* 공통 상태 목록 */
 const STATUS_LIST = [
   "재실",
   "미디어스페이스",
@@ -57,7 +58,7 @@ export default function TeacherPageInner() {
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // 내가 최근에 건드린 시각
+  // 내가 최근에 건드린 학생들 timestamp
   const editedRef = useRef<Record<string, number>>({});
 
   // 최초 로드
@@ -87,12 +88,12 @@ export default function TeacherPageInner() {
       const editedMap = editedRef.current;
 
       setStudents((prev) => {
-        const prevById = new Map(prev.map((s) => [s.id, s]));
+        const prevMap = new Map(prev.map((s) => [s.id, s]));
         const merged = data.map((s) => {
           const editedAt = editedMap[s.id];
-          // 10초 안에 내가 만진 애는 서버 값 무시
+          // 10초 안에 내가 만진 애면 서버값 무시
           if (editedAt && now - editedAt < 10_000) {
-            return prevById.get(s.id) ?? s;
+            return prevMap.get(s.id) ?? s;
           }
           return s;
         });
@@ -113,39 +114,45 @@ export default function TeacherPageInner() {
     editedRef.current[id] = Date.now();
   };
 
-  // 여기서 서버 응답으로 바로 덮어쓰지 않는 게 포인트
+  // bulk 업데이트
   const bulkUpdate = async (
     updates: Array<
       Partial<Pick<Student, "status" | "reason" | "approved">> & { id: string }
     >
   ) => {
-    // 1) 화면 먼저
+    // 화면 먼저
     setStudents((prev) => {
       const m = new Map(prev.map((s) => [s.id, s]));
       for (const u of updates) {
         const old = m.get(u.id);
-        if (old) {
-          m.set(u.id, { ...old, ...u });
-        }
+        if (old) m.set(u.id, { ...old, ...u });
       }
       return sortById(Array.from(m.values()));
     });
 
-    // 2) 내가 만졌다고 표시
-    updates.forEach((u) => {
-      if (u.id) markEdited(u.id);
-    });
+    updates.forEach((u) => markEdited(u.id));
 
-    // 3) 서버로 보내긴 함
-    await fetch("/api/students/bulk", {
+    const res = await fetch("/api/students/bulk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ updates }),
     });
 
-    // 4) 여기서 굳이 setStudents(...) 안 함.
-    //    3초마다 오는 폴링이 있고, editedRef가 10초 동안 보호해줄 거라
-    //    이 타이밍 레이스를 여기서 안 만든다.
+    if (res.ok) {
+      const data = await res.json();
+      if (data && Array.isArray(data.students)) {
+        // 서버가 가진 진짜 최신 상태로 덮어쓰기
+        setStudents(sortById(data.students));
+        return;
+      }
+    }
+
+    // 실패 시 전체 다시
+    const res2 = await fetch("/api/students", { cache: "no-store" });
+    if (res2.ok) {
+      const latest: Student[] = await res2.json();
+      setStudents(sortById(latest));
+    }
   };
 
   const saveStudent = async (id: string, updates: Partial<Student>) => {
@@ -282,7 +289,7 @@ export default function TeacherPageInner() {
                     onClick={resetAllExceptOut}
                     className="px-3 py-1 text-xs bg-indigo-500 text-white rounded"
                   >
-                    귀가/외출/호실 제외 재실
+                    귀가/외출/호실자습 제외 재실
                   </button>
                 </div>
               </div>
@@ -446,7 +453,9 @@ export default function TeacherPageInner() {
   );
 }
 
-/* 스케줄러 탭 */
+/* ──────────────────────────────── */
+/* 스케줄러 탭은 네가 쓰던 거 그대로 */
+/* ──────────────────────────────── */
 function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
   const [day, setDay] = useState<DayKey>("mon");
   const [slot, setSlot] = useState<TimeSlot>("8교시");
@@ -470,9 +479,11 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
   useEffect(() => {
     const load = async () => {
       setLoading(true);
+
       const res = await fetch(
         `/api/scheduler?day=${day}&slot=${encodeURIComponent(slot)}`
       );
+
       if (res.ok) {
         const data = await res.json();
         const items =

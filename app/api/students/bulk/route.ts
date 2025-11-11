@@ -2,6 +2,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { students } from "@/app/lib/data";
 
+function getSortedStudents() {
+  return [...students].sort((a, b) => Number(a.id) - Number(b.id));
+}
+
+// POST /api/students/bulk
+// { updates: [ { id, status?, reason?, approved? }, ... ] }
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -23,23 +29,18 @@ export async function POST(req: NextRequest) {
 
     for (const u of updates) {
       if (!u.id) continue;
-      const st = students.find((s) => s.id === u.id);
-      if (!st) continue;
+      const target = students.find((s) => s.id === u.id);
+      if (!target) continue;
 
-      if (typeof u.status === "string") {
-        st.status = u.status;
-      }
-      if (typeof u.reason === "string") {
-        st.reason = u.reason;
-      }
-      if (typeof u.approved === "boolean") {
-        st.approved = u.approved;
-      }
+      if (typeof u.status === "string") target.status = u.status;
+      if (typeof u.reason === "string") target.reason = u.reason;
+      if (typeof u.approved === "boolean") target.approved = u.approved;
     }
 
-    // 필요한 사람은 여기서 전체를 받아가게 할 수도 있음
-    const sorted = [...students].sort((a, b) => Number(a.id) - Number(b.id));
-    return NextResponse.json({ ok: true, students: sorted }, { status: 200 });
+    return NextResponse.json(
+      { ok: true, students: getSortedStudents() },
+      { status: 200 }
+    );
   } catch (err) {
     console.error("bulk update error", err);
     return NextResponse.json(
