@@ -77,18 +77,26 @@ function statusToPlace(
   return "etc";
 }
 
-// (있던 스케줄 자동 적용 유지)
 function getDayKeyByDate(
   d: Date
 ): "mon" | "tue" | "wed" | "thu" | "fri" | null {
   const day = d.getDay();
-  if (day === 1) return "mon";
-  if (day === 2) return "tue";
-  if (day === 3) return "wed";
-  if (day === 4) return "thu";
-  if (day === 5) return "fri";
-  return null;
+  switch (day) {
+    case 1:
+      return "mon";
+    case 2:
+      return "tue";
+    case 3:
+      return "wed";
+    case 4:
+      return "thu";
+    case 5:
+      return "fri";
+    default:
+      return null;
+  }
 }
+
 function getSlotByDate(
   d: Date
 ): "8교시" | "야간 1차시" | "야간 2차시" | null {
@@ -104,7 +112,6 @@ export default function DisplayPage() {
   const [students, setStudents] = useState<Student[]>([]);
   const [now, setNow] = useState("");
   const lastAppliedRef = useRef<string | null>(null);
-  const editedRef = useRef<Record<string, number>>({});
 
   // 시간 표시
   useEffect(() => {
@@ -122,7 +129,7 @@ export default function DisplayPage() {
     return () => clearInterval(t);
   }, []);
 
-  // 학생 데이터 2초마다
+  // ✅ 학생 데이터 주기적으로 가져오기 (읽기 전용)
   useEffect(() => {
     let alive = true;
 
@@ -130,21 +137,7 @@ export default function DisplayPage() {
       const res = await fetch("/api/students", { cache: "no-store" });
       if (!res.ok) return;
       const data: Student[] = await res.json();
-      if (!alive) return;
-
-      const now = Date.now();
-      const editedMap = editedRef.current;
-      setStudents((prev) => {
-        const prevMap = new Map(prev.map((s) => [s.id, s]));
-        const merged = data.map((s) => {
-          const editedAt = editedMap[s.id];
-          if (editedAt && now - editedAt < 10_000) {
-            return prevMap.get(s.id) ?? s;
-          }
-          return s;
-        });
-        return sortById(merged);
-      });
+      if (alive) setStudents(sortById(data));
     };
 
     load();
@@ -155,7 +148,7 @@ export default function DisplayPage() {
     };
   }, []);
 
-  // 스케줄 자동 적용 (그대로)
+  // 스케줄 자동 적용
   useEffect(() => {
     const checkAndApply = async () => {
       const d = new Date();
@@ -180,28 +173,19 @@ export default function DisplayPage() {
     return () => clearInterval(t);
   }, []);
 
-  const markEdited = (id: string) => {
-    editedRef.current[id] = Date.now();
-  };
-
-  // 디스플레이에서 수정
+  // 디스플레이에서 수정 가능하도록(이건 네가 원래 쓰던 거 유지)
   const saveStudent = async (id: string, updates: Partial<Student>) => {
-    // 화면 먼저
     setStudents((prev) =>
       sortById(prev.map((s) => (s.id === id ? { ...s, ...updates } : s)))
     );
-    markEdited(id);
-
-    // 서버에 단건 bulk로 보내기
-    await fetch("/api/students/bulk", {
-      method: "POST",
+    await fetch("/api/students", {
+      method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ updates: [{ id, ...updates }] }),
+      body: JSON.stringify({ id, ...updates }),
     });
-    // 여기서 굳이 다시 set 안 해도 위 2초 폴링이 알아서 서버 값 가져감
   };
 
-  // 일괄 재실
+  // 일괄 재실 버튼은 남겨둠
   const resetAllToPresent = async () => {
     const updated = students.map((s) => ({
       ...s,
@@ -209,23 +193,17 @@ export default function DisplayPage() {
       reason: "",
     }));
     setStudents(sortById(updated));
-    const now = Date.now();
-    const editedMap = editedRef.current;
-    for (const s of students) {
-      editedMap[s.id] = now;
-    }
 
-    await fetch("/api/students/bulk", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        updates: students.map((s) => ({
-          id: s.id,
-          status: "재실",
-          reason: "",
-        })),
-      }),
-    });
+    // 서버도 맞춰줌
+    await Promise.all(
+      students.map((s) =>
+        fetch("/api/students", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: s.id, status: "재실", reason: "" }),
+        })
+      )
+    );
   };
 
   // 분류
@@ -249,13 +227,13 @@ export default function DisplayPage() {
   }
   const etcStatusKeys = Object.keys(etcByStatus);
 
-  // 인원
   const totalCount = students.length;
   const inClassOrMedia = students.filter((s) => {
     const place = statusToPlace(s.status);
     return place === "classroom" || place === "mediaspace";
   }).length;
   const outClassOrMedia = totalCount - inClassOrMedia;
+
   const inCampus = students.filter((s) => {
     const place = statusToPlace(s.status);
     if (place === "gone") return false;
@@ -334,7 +312,9 @@ export default function DisplayPage() {
                         <button
                           disabled
                           className={`text-[11px] px-2 py-[2px] rounded w-full ${
-                            s.approved ? "bg-green-500 text-white" : "bg-gray-300"
+                            s.approved
+                              ? "bg-green-500 text-white"
+                              : "bg-gray-300"
                           }`}
                         >
                           {s.approved ? "O" : "X"}
@@ -349,7 +329,6 @@ export default function DisplayPage() {
 
         {/* 오른쪽 전체 */}
         <div className="flex-1 flex flex-col gap-4 min-h-0">
-          {/* 위쪽: 교실 + 오른쪽 묶음 */}
           <div className="flex gap-4 min-h-[360px]">
             {/* 교실 */}
             <div className="relative border-2 border-black w-[650px] h-[420px] flex flex-col">
@@ -375,9 +354,8 @@ export default function DisplayPage() {
 
             {/* 오른쪽: 미디어/귀가 + 인원 */}
             <div className="flex-1 flex gap-3 min-h-0 h-[420px]">
-              {/* 왼쪽 세로: 미디어 + 귀가 */}
+              {/* 왼쪽 세로 */}
               <div className="w-[360px] flex flex-col gap-3 h-full min-h-0">
-                {/* 미디어스페이스 */}
                 <div className="border-2 border-black flex-1 flex flex-col min-h-0">
                   <div className="text-center font-bold py-1 border-b border-black bg-white">
                     &lt;미디어스페이스&gt;
@@ -394,7 +372,6 @@ export default function DisplayPage() {
                   </div>
                 </div>
 
-                {/* 귀가/외출 */}
                 <div className="border-2 border-black flex-1 flex flex-col min-h-0">
                   <div className="text-center font-bold py-1 border-b border-black bg-white">
                     &lt;귀가/외출&gt;
@@ -412,7 +389,7 @@ export default function DisplayPage() {
                 </div>
               </div>
 
-              {/* 오른쪽: 인원 카드 2개 */}
+              {/* 오른쪽 인원 카드 */}
               <div className="flex-1 flex flex-col gap-3 h-full min-h-0">
                 <div className="bg-white border border-gray-300 rounded-md px-3 py-3 flex-1 flex flex-col">
                   <div className="text-base font-semibold mb-3 text-center">

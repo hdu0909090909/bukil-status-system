@@ -2,11 +2,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { students } from "@/app/lib/data";
 
-function getSortedStudents() {
-  return [...students].sort((a, b) => Number(a.id) - Number(b.id));
-}
-
-// POST /api/students/bulk
 // { updates: [ { id, status?, reason?, approved? }, ... ] }
 export async function POST(req: NextRequest) {
   try {
@@ -29,18 +24,17 @@ export async function POST(req: NextRequest) {
 
     for (const u of updates) {
       if (!u.id) continue;
-      const target = students.find((s) => s.id === u.id);
-      if (!target) continue;
+      const st = students.find((s) => s.id === u.id);
+      if (!st) continue;
 
-      if (typeof u.status === "string") target.status = u.status;
-      if (typeof u.reason === "string") target.reason = u.reason;
-      if (typeof u.approved === "boolean") target.approved = u.approved;
+      if (typeof u.status === "string") st.status = u.status;
+      if (typeof u.reason === "string") st.reason = u.reason;
+      if (typeof u.approved === "boolean") st.approved = u.approved;
     }
 
-    return NextResponse.json(
-      { ok: true, students: getSortedStudents() },
-      { status: 200 }
-    );
+    // 여기서 전체 students를 돌려줘도 되고, 안 돌려줘도 되는데
+    // 지금 교사 페이지는 어차피 응답을 안 덮어쓰게 해놨으니 간단히 ok만 준다
+    return NextResponse.json({ ok: true }, { status: 200 });
   } catch (err) {
     console.error("bulk update error", err);
     return NextResponse.json(
