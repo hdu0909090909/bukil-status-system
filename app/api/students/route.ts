@@ -1,67 +1,42 @@
 // app/api/students/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import {
-  getStudents,
-  saveStudents,
-  type Student,
-} from "@/app/lib/store";
+import { students } from "@/app/lib/data";
 
-// (Vercel에서 fs 쓰려면 node 런타임으로)
-export const runtime = "nodejs";
-
-// 공통 정렬
-function sortById(list: Student[]) {
-  return [...list].sort((a, b) => Number(a.id) - Number(b.id));
+// 항상 학번순으로 정렬해서 보내기
+function getSortedStudents() {
+  return [...students].sort((a, b) => Number(a.id) - Number(b.id));
 }
 
-// GET /api/students  → 항상 파일에서 읽음
+// GET /api/students
 export async function GET() {
-  const students = await getStudents();
-  return NextResponse.json(sortById(students), {
-    status: 200,
-    headers: {
-      "Cache-Control": "no-store",
-    },
-  });
+  // 여기서는 이제 ensureDailyReset 안 돌림 (디스플레이가 따로 하든 말든)
+  return NextResponse.json(getSortedStudents(), { status: 200 });
 }
 
 // PATCH /api/students
+// - 단건: { id, status?, reason?, approved? ... }
+// - 여러건: [ { id, ... }, { id, ... } ]
 export async function PATCH(req: NextRequest) {
   const body = await req.json();
-  const students = await getStudents();
 
-  // 여러 명 한꺼번에
+  // 1) 여러 명 한꺼번에 오는 경우
   if (Array.isArray(body)) {
     for (const item of body) {
-      const { id, ...updates } = item as {
-        id?: string;
-        status?: string;
-        reason?: string;
-        approved?: boolean;
-      };
+      const { id, ...updates } = item as { id?: string; [key: string]: any };
       if (!id) continue;
       const target = students.find((s) => s.id === id);
       if (!target) continue;
-      if (typeof updates.status === "string") target.status = updates.status;
-      if (typeof updates.reason === "string") target.reason = updates.reason;
-      if (typeof updates.approved === "boolean")
-        target.approved = updates.approved;
+      Object.assign(target, updates);
     }
-    await saveStudents(students);
+
     return NextResponse.json(
-      { ok: true, students: sortById(students) },
+      { ok: true, students: getSortedStudents() },
       { status: 200 }
     );
   }
 
-  // 한 명
-  const { id, ...updates } = body as {
-    id?: string;
-    status?: string;
-    reason?: string;
-    approved?: boolean;
-  };
-
+  // 2) 단일 업데이트
+  const { id, ...updates } = body as { id?: string; [key: string]: any };
   if (!id) {
     return NextResponse.json(
       { ok: false, message: "id가 필요합니다." },
@@ -77,12 +52,7 @@ export async function PATCH(req: NextRequest) {
     );
   }
 
-  if (typeof updates.status === "string") target.status = updates.status;
-  if (typeof updates.reason === "string") target.reason = updates.reason;
-  if (typeof updates.approved === "boolean")
-    target.approved = updates.approved;
-
-  await saveStudents(students);
+  Object.assign(target, updates);
 
   return NextResponse.json(
     { ok: true, student: target },
