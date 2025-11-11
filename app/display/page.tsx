@@ -134,7 +134,7 @@ export default function DisplayPage() {
       setNow(`${yyyy}-${mm}-${dd} ${hh}:${mi}`);
     };
     tick();
-    const t = setInterval(tick, 30_000);
+    const t = setInterval(tick, 5000);
     return () => clearInterval(t);
   }, []);
 
