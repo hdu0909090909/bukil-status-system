@@ -1,10 +1,8 @@
-// app/teacher/TeacherPageInner.tsx
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-/* 공통 상태 목록 */
 const STATUS_LIST = [
   "재실",
   "미디어스페이스",
@@ -16,7 +14,7 @@ const STATUS_LIST = [
   "방과후수업",
   "동아리 활동",
   "교내활동",
-  "화장실",
+  "보건실 요양",
   "상담",
   "기타",
 ] as const;
@@ -44,13 +42,7 @@ const TIME_SLOTS = ["8교시", "야간 1차시", "야간 2차시"] as const;
 type DayKey = (typeof DAYS)[number]["key"];
 type TimeSlot = (typeof TIME_SLOTS)[number];
 
-const sortById = <T extends { id: string }>(list: T[]) =>
-  [...list].sort((a, b) => Number(a.id) - Number(b.id));
-
-const POLLING_MS = 3000; // 예전처럼 3초
-const HOLD_MS = 8000; // 내가 만진 애는 8초간 서버값으로 안 덮어씀
-
-export default function TeacherPageInner() {
+export default function TeacherPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const userParam = searchParams.get("user") || "윤인하";
@@ -61,163 +53,121 @@ export default function TeacherPageInner() {
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // 내가 최근에 건드린 시각
-  const editedRef = useRef<Record<string, number>>({});
-
-  // 처음 1번
+  // 첫 로드
   useEffect(() => {
     const load = async () => {
-  const res = await fetch(`/api/students?ts=${Date.now()}`, {
-    cache: "no-store",
-  });
-
+      const res = await fetch("/api/students");
       const data: Student[] = await res.json();
-      setStudents(sortById(data));
+      data.sort((a, b) => Number(a.id) - Number(b.id));
+      setStudents(data);
       setLoading(false);
     };
     load();
   }, []);
 
-  // 상태 탭일 때만 폴링
+  // 상태 탭일 때만 폴링 (3초)
   useEffect(() => {
     if (tab !== "status") return;
-
     let stop = false;
-
     const tick = async () => {
-      const res = await fetch("/api/students", { cache: "no-store" });
+      const res = await fetch("/api/students");
       if (!res.ok) return;
-      const serverData: Student[] = await res.json();
-      if (stop) return;
-
-      const now = Date.now();
-      const editedMap = editedRef.current;
-
-      setStudents((prev) => {
-        const prevById = new Map(prev.map((s) => [s.id, s]));
-        const merged = serverData.map((s) => {
-          const editedAt = editedMap[s.id];
-          // 최근 HOLD_MS 안에 내가 만진 애는 서버값으로 덮어쓰지 않음
-          if (editedAt && now - editedAt < HOLD_MS) {
-            return prevById.get(s.id) ?? s;
-          }
-          return s;
-        });
-        return sortById(merged);
-      });
+      const data: Student[] = await res.json();
+      data.sort((a, b) => Number(a.id) - Number(b.id));
+      if (!stop) setStudents(data);
     };
-
     tick();
-    const t = setInterval(tick, POLLING_MS);
-
+    const t = setInterval(tick, 3000);
     return () => {
       stop = true;
       clearInterval(t);
     };
   }, [tab]);
 
-  const markEdited = (id: string) => {
-    editedRef.current[id] = Date.now();
-  };
-
-  // 공통 bulk
+  // 공통: 서버에 벌크로 보내기
   const bulkUpdate = async (
-    updates: Array<
-      Partial<Pick<Student, "status" | "reason" | "approved">> & { id: string }
-    >,
-    opts?: { refreshAfter?: boolean }
+    items: Array<{ id: string } & Partial<Student>>
   ) => {
-    // 1) 화면 먼저
+    // 1) 먼저 화면에 즉시 반영
     setStudents((prev) => {
-      const m = new Map(prev.map((s) => [s.id, s]));
-      for (const u of updates) {
-        const old = m.get(u.id);
-        if (old) {
-          m.set(u.id, { ...old, ...u });
+      const map: Record<string, Student> = {};
+      prev.forEach((s) => {
+        map[s.id] = { ...s };
+      });
+      for (const item of items) {
+        const target = map[item.id];
+        if (target) {
+          Object.assign(target, item);
         }
       }
-      return sortById(Array.from(m.values()));
+      return Object.values(map).sort((a, b) => Number(a.id) - Number(b.id));
     });
 
-    // 2) 내가 방금 만졌다고 표시
-    updates.forEach((u) => {
-      if (u.id) markEdited(u.id);
-    });
-
-    // 3) 서버로 전송
-    const res = await fetch("/api/students/bulk", {
-      method: "POST",
+    // 2) 서버에 한 번만 요청
+    await fetch("/api/students", {
+      method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ updates }),
+      body: JSON.stringify(items),
     });
-
-    // 단일 변경일 때는 여기서 서버 응답으로 안 덮어씀
-    // 일괄 버튼 눌렀을 때만 서버 버전으로 싹 맞춰도 됨
-    if (opts?.refreshAfter && res.ok) {
-      const data = await res.json().catch(() => null);
-      if (data && Array.isArray(data.students)) {
-        // 그래도 바로 덮어쓰면 내가 방금 만진 애는 또 덮어쓰니까
-        // editedRef에 찍혀있는 애는 위 폴링에서 지켜줄 거라 그냥 세팅
-        setStudents(sortById(data.students));
-      }
-    }
   };
 
-  // 개별 저장은 refreshAfter 안 건다
+  // 단건 저장도 bulk 하나로 돌림
   const saveStudent = async (id: string, updates: Partial<Student>) => {
-    await bulkUpdate([{ id, ...updates }], { refreshAfter: false });
+    await bulkUpdate([{ id, ...updates }]);
   };
 
-  // 일괄 버튼들은 refreshAfter 켠다
+  // 일괄 재실
   const resetAllToPresent = async () => {
-    await bulkUpdate(
-      students.map((s) => ({ id: s.id, status: "재실", reason: "" })),
-      { refreshAfter: true }
-    );
+    const payload = students.map((s) => ({
+      id: s.id,
+      status: "재실" as const,
+      reason: "",
+    }));
+    await bulkUpdate(payload);
   };
+
+  // 일괄 허가
   const approveAll = async () => {
-    await bulkUpdate(
-      students.map((s) => ({ id: s.id, approved: true })),
-      { refreshAfter: true }
-    );
+    const payload = students.map((s) => ({
+      id: s.id,
+      approved: true,
+    }));
+    await bulkUpdate(payload);
   };
+
+  // 일괄 불허가
   const disapproveAll = async () => {
-    await bulkUpdate(
-      students.map((s) => ({ id: s.id, approved: false })),
-      { refreshAfter: true }
-    );
-  };
-  const resetAllExceptOut = async () => {
-    await bulkUpdate(
-      students
-        .filter(
-          (s) =>
-            s.status !== "귀가" && s.status !== "외출" && s.status !== "호실자습"
-        )
-        .map((s) => ({ id: s.id, status: "재실", reason: "" })),
-      { refreshAfter: true }
-    );
+    const payload = students.map((s) => ({
+      id: s.id,
+      approved: false,
+    }));
+    await bulkUpdate(payload);
   };
 
-  const handleLogout = () => router.push("/");
+  const handleLogout = () => {
+    router.push("/");
+  };
 
-  // 카드 계산
+  // 인원 카드 계산
   const total = students.length;
   const inClassOrMedia = students.filter(
     (s) => s.status === "재실" || s.status === "미디어스페이스"
   ).length;
   const outClassOrMedia = total - inClassOrMedia;
-  const inCampus = students.filter(
-    (s) => !["귀가", "외출", "호실자습"].includes(s.status)
-  ).length;
+
+  const inCampus = students.filter((s) => {
+    if (s.status === "귀가" || s.status === "외출") return false;
+    if (s.status === "호실자습") return false;
+    return true;
+  }).length;
   const outCampus = total - inCampus;
 
+  // 스케줄 적용 뒤 바로 상태 새로고침
   const refreshNow = async () => {
-    const res = await fetch("/api/students", { cache: "no-store" });
-    if (res.ok) {
-      const data: Student[] = await res.json();
-      setStudents(sortById(data));
-    }
+    const res = await fetch("/api/students");
+    const data: Student[] = await res.json();
+    data.sort((a, b) => Number(a.id) - Number(b.id));
+    setStudents(data);
   };
 
   return (
@@ -303,12 +253,6 @@ export default function TeacherPageInner() {
                   >
                     일괄 불허가
                   </button>
-                  <button
-                    onClick={resetAllExceptOut}
-                    className="px-3 py-1 text-xs bg-indigo-500 text-white rounded"
-                  >
-                    귀가/외출자 제외 재실
-                  </button>
                 </div>
               </div>
 
@@ -334,7 +278,10 @@ export default function TeacherPageInner() {
                   <tbody>
                     {loading ? (
                       <tr>
-                        <td colSpan={5} className="px-2 py-4 text-center">
+                        <td
+                          colSpan={5}
+                          className="px-2 py-4 text-center text-gray-400"
+                        >
                           불러오는 중...
                         </td>
                       </tr>
@@ -351,13 +298,12 @@ export default function TeacherPageInner() {
                           <td className="px-2 py-1">
                             <select
                               value={s.status}
-                              onChange={(e) => {
-                                // 선택 즉시 화면 반영 + 서버 전송
+                              onChange={(e) =>
                                 saveStudent(s.id, {
                                   status: e.target.value as Status,
-                                });
-                              }}
-                              className="border rounded px-1 py-[2px] text-sm w-full"
+                                })
+                              }
+                              className="border rounded px-1 py-[2px] text-sm w-full bg-white"
                             >
                               {STATUS_LIST.map((st) => (
                                 <option key={st} value={st}>
@@ -369,21 +315,10 @@ export default function TeacherPageInner() {
                           <td className="px-2 py-1">
                             <input
                               value={s.reason}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                // 입력 중일 땐 화면에만
-                                setStudents((prev) =>
-                                  prev.map((p) =>
-                                    p.id === s.id ? { ...p, reason: v } : p
-                                  )
-                                );
-                                markEdited(s.id);
-                              }}
-                              onBlur={(e) => {
-                                // 포커스 빠질 때만 서버 반영
-                                saveStudent(s.id, { reason: e.target.value });
-                              }}
-                              className="border rounded px-1 py-[2px] text-sm w-full"
+                              onChange={(e) =>
+                                saveStudent(s.id, { reason: e.target.value })
+                              }
+                              className="border rounded px-1 py-[2px] text-sm w-full bg-white"
                               placeholder="여기에 사유 입력"
                             />
                           </td>
@@ -415,23 +350,19 @@ export default function TeacherPageInner() {
                 <div className="text-sm font-semibold mb-1">
                   인원(교실, 미디어스페이스)
                 </div>
-                <div className="flex justify-between text-sm items-center">
+                <div className="flex justify-between text-sm">
                   <span>총원</span>
                   <span className="font-bold text-lg">{total}</span>
                 </div>
-                <div className="flex justify-between text-sm items-center">
+                <div className="flex justify-between text-sm">
                   <span>재실인원</span>
                   <span className="font-bold text-lg text-green-600">
                     {inClassOrMedia}
                   </span>
                 </div>
-                <div className="flex justify-between text-sm items-center">
+                <div className="flex justify-between text-sm">
                   <span>결원</span>
-                  <span
-                    className={`font-bold text-lg ${
-                      outClassOrMedia === 0 ? "text-gray-500" : "text-red-500"
-                    }`}
-                  >
+                  <span className="font-bold text-lg text-red-500">
                     {outClassOrMedia}
                   </span>
                 </div>
@@ -441,23 +372,19 @@ export default function TeacherPageInner() {
                 <div className="text-sm font-semibold mb-1">
                   인원(교내에 있는 학생)
                 </div>
-                <div className="flex justify-between text-sm items-center">
+                <div className="flex justify-between text-sm">
                   <span>총원</span>
                   <span className="font-bold text-lg">{total}</span>
                 </div>
-                <div className="flex justify-between text-sm items-center">
-                  <span>교내에 있음</span>
+                <div className="flex justify-between text-sm">
+                  <span>재실인원</span>
                   <span className="font-bold text-lg text-green-600">
                     {inCampus}
                   </span>
                 </div>
-                <div className="flex justify-between text-sm items-center">
-                  <span>교내에 없음</span>
-                  <span
-                    className={`font-bold text-lg ${
-                      outCampus === 0 ? "text-gray-500" : "text-red-500"
-                    }`}
-                  >
+                <div className="flex justify-between text-sm">
+                  <span>결원</span>
+                  <span className="font-bold text-lg text-red-500">
                     {outCampus}
                   </span>
                 </div>
@@ -473,7 +400,7 @@ export default function TeacherPageInner() {
 }
 
 /* ──────────────────────────────── */
-/* 스케줄러 탭 그대로 */
+/* 스케줄러 탭 */
 /* ──────────────────────────────── */
 function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
   const [day, setDay] = useState<DayKey>("mon");
@@ -482,21 +409,11 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
     Array<{ studentId: string; name: string; status: string; reason: string }>
   >([]);
   const [loading, setLoading] = useState(false);
-  const [schedEnabled, setSchedEnabled] = useState(true);
 
-  // 스케줄러 on/off
-  useEffect(() => {
-    const loadState = async () => {
-      const res = await fetch("/api/scheduler/state", { cache: "no-store" });
-      if (res.ok) {
-        const data = await res.json();
-        setSchedEnabled(data.enabled ?? true);
-      }
-    };
-    loadState();
-  }, []);
+  const sortById = (
+    list: Array<{ studentId: string; name: string; status: string; reason: string }>
+  ) => [...list].sort((a, b) => Number(a.studentId) - Number(b.studentId));
 
-  // 요일/시간 바뀔 때마다 스케줄 불러오기
   useEffect(() => {
     const load = async () => {
       setLoading(true);
@@ -507,39 +424,32 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
 
       if (res.ok) {
         const data = await res.json();
-        const items =
-          (data.items as Array<{
-            studentId: string;
-            name: string;
-            status: string;
-            reason: string;
-          }>) ?? [];
+        const items = (data.items ?? []) as Array<{
+          studentId: string;
+          name: string;
+          status: string;
+          reason: string;
+        }>;
 
         if (items.length > 0) {
-          setRows(
-            [...items].sort(
-              (a, b) => Number(a.studentId) - Number(b.studentId)
-            )
-          );
+          setRows(sortById(items));
           setLoading(false);
           return;
         }
       }
 
-      // 없으면 학생 목록으로 채우기
-      const res2 = await fetch("/api/students", { cache: "no-store" });
+      const res2 = await fetch("/api/students");
       if (res2.ok) {
         const students: Student[] = await res2.json();
-        setRows(
-          students
-            .map((s) => ({
-              studentId: s.id,
-              name: s.name,
-              status: "변경안함",
-              reason: "",
-            }))
-            .sort((a, b) => Number(a.studentId) - Number(b.studentId))
-        );
+        const filled = students
+          .map((s) => ({
+            studentId: s.id,
+            name: s.name,
+            status: "변경안함",
+            reason: "",
+          }))
+          .sort((a, b) => Number(a.studentId) - Number(b.studentId));
+        setRows(filled);
       } else {
         setRows([]);
       }
@@ -550,32 +460,23 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
     load();
   }, [day, slot]);
 
-  const toggleScheduler = async () => {
-    const next = !schedEnabled;
-    setSchedEnabled(next);
-    await fetch("/api/scheduler/state", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: next }),
-    });
+  const fillFromCurrent = async () => {
+    const res = await fetch("/api/students");
+    const students: Student[] = await res.json();
+    const items = students
+      .map((s) => ({
+        studentId: s.id,
+        name: s.name,
+        status: s.status ?? "변경안함",
+        reason: s.reason ?? "",
+      }))
+      .sort((a, b) => Number(a.studentId) - Number(b.studentId));
+    setRows(items);
   };
 
   const setAllNoChange = () => {
-    setRows((prev) => prev.map((r) => ({ ...r, status: "변경안함", reason: "" })));
-  };
-
-  const fillFromCurrent = async () => {
-    const res = await fetch("/api/students", { cache: "no-store" });
-    const students: Student[] = await res.json();
-    setRows(
-      students
-        .map((s) => ({
-          studentId: s.id,
-          name: s.name,
-          status: s.status ?? "변경안함",
-          reason: s.reason ?? "",
-        }))
-        .sort((a, b) => Number(a.studentId) - Number(b.studentId))
+    setRows((prev) =>
+      prev.map((r) => ({ ...r, status: "변경안함", reason: "" }))
     );
   };
 
@@ -598,8 +499,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
       alert("이 스케줄을 적용했습니다.");
       onApplied?.();
     } else {
-      const err = await res.json().catch(() => ({}));
-      alert(err.message || "스케줄 적용에 실패했습니다.");
+      alert("스케줄 적용에 실패했습니다.");
     }
   };
 
@@ -615,7 +515,6 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
   return (
     <div className="bg-white border border-gray-300 rounded-md p-3 flex flex-col gap-3">
       <div className="flex flex-wrap gap-2 items-center">
-        {/* 요일 버튼 */}
         <div className="flex gap-1">
           {DAYS.map((d) => (
             <button
@@ -629,8 +528,6 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
             </button>
           ))}
         </div>
-
-        {/* 시간 버튼 */}
         <div className="flex gap-1 ml-2">
           {TIME_SLOTS.map((t) => (
             <button
@@ -645,15 +542,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
           ))}
         </div>
 
-        <div className="ml-auto flex gap-2 items-center">
-          <button
-            onClick={toggleScheduler}
-            className={`px-3 py-1 text-sm rounded ${
-              schedEnabled ? "bg-green-500 text-white" : "bg-gray-300"
-            }`}
-          >
-            자동 스케줄 {schedEnabled ? "ON" : "OFF"}
-          </button>
+        <div className="ml-auto flex gap-2">
           <button
             onClick={setAllNoChange}
             className="px-3 py-1 text-sm bg-gray-200 rounded"
