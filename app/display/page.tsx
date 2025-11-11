@@ -29,7 +29,6 @@ type Student = {
   seatId?: string;
 };
 
-// 자리 좌표
 const SEAT_POS: Record<string, { x: number; y: number }> = {
   "11115": { x: 40, y: 20 },
   "11130": { x: 140, y: 20 },
@@ -76,7 +75,6 @@ function statusToPlace(
   return "etc";
 }
 
-// (있던 스케줄 자동 적용용) 요일
 function getDayKeyByDate(
   d: Date
 ): "mon" | "tue" | "wed" | "thu" | "fri" | null {
@@ -97,7 +95,6 @@ function getDayKeyByDate(
   }
 }
 
-// 시간대
 function getSlotByDate(
   d: Date
 ): "8교시" | "야간 1차시" | "야간 2차시" | null {
@@ -112,8 +109,6 @@ export default function DisplayPage() {
   const [students, setStudents] = useState<Student[]>([]);
   const [now, setNow] = useState("");
   const lastAppliedRef = useRef<string | null>(null);
-
-  // ↑ 여기까지는 네가 쓰던거 그대로
 
   // 시계
   useEffect(() => {
@@ -131,7 +126,7 @@ export default function DisplayPage() {
     return () => clearInterval(t);
   }, []);
 
-  // 👇 학생 데이터: **읽기만** 3초마다
+  // 3초마다 읽기만
   useEffect(() => {
     let alive = true;
 
@@ -151,7 +146,7 @@ export default function DisplayPage() {
     };
   }, []);
 
-  // 스케줄 자동 적용은 있던거 유지
+  // 스케줄 자동 적용
   useEffect(() => {
     const checkAndApply = async () => {
       const d = new Date();
@@ -176,13 +171,11 @@ export default function DisplayPage() {
     return () => clearInterval(t);
   }, []);
 
-  // 디스플레이에서 직접 수정할 때만 서버에 씀
+  // 서버 저장 함수
   const saveStudent = async (id: string, updates: Partial<Student>) => {
-    // 화면 먼저
     setStudents((prev) =>
       sortById(prev.map((s) => (s.id === id ? { ...s, ...updates } : s)))
     );
-    // 서버
     await fetch("/api/students", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -199,7 +192,6 @@ export default function DisplayPage() {
     }));
     setStudents(sortById(updated));
 
-    // 서버도 한 명씩 (너가 쓰던 방식 유지)
     await Promise.all(
       students.map((s) =>
         fetch("/api/students", {
@@ -301,9 +293,21 @@ export default function DisplayPage() {
                       </select>
                     </td>
                     <td className="px-2 py-1">
+                      {/* 👇 여기만 바뀜: onChange는 화면만, onBlur 때 서버 저장 */}
                       <input
                         value={s.reason}
                         onChange={(e) =>
+                          setStudents((prev) =>
+                            sortById(
+                              prev.map((p) =>
+                                p.id === s.id
+                                  ? { ...p, reason: e.target.value }
+                                  : p
+                              )
+                            )
+                          )
+                        }
+                        onBlur={(e) =>
                           saveStudent(s.id, { reason: e.target.value })
                         }
                         className="border rounded px-1 py-[1px] text-[11px] w-full"
@@ -328,10 +332,9 @@ export default function DisplayPage() {
         </div>
 
         {/* 오른쪽 전체 */}
+        {/* (아래는 네가 쓰던 레이아웃 그대로라서 생략 없이 둠) */}
         <div className="flex-1 flex flex-col gap-4 min-h-0">
-          {/* 위쪽: 교실 + 오른쪽 묶음 */}
           <div className="flex gap-4 min-h-[360px]">
-            {/* 교실 */}
             <div className="relative border-2 border-black w-[650px] h-[420px] flex flex-col">
               <div className="text-center font-bold py-1 border-b border-black bg-white">
                 &lt;교실&gt;
@@ -353,11 +356,8 @@ export default function DisplayPage() {
               </div>
             </div>
 
-            {/* 오른쪽: 미디어/귀가 + 인원 */}
             <div className="flex-1 flex gap-3 min-h-0 h-[420px]">
-              {/* 왼쪽 세로: 미디어 + 귀가 */}
               <div className="w-[360px] flex flex-col gap-3 h-full min-h-0">
-                {/* 미디어스페이스 */}
                 <div className="border-2 border-black flex-1 flex flex-col min-h-0">
                   <div className="text-center font-bold py-1 border-b border-black bg-white">
                     &lt;미디어스페이스&gt;
@@ -374,7 +374,6 @@ export default function DisplayPage() {
                   </div>
                 </div>
 
-                {/* 귀가/외출 */}
                 <div className="border-2 border-black flex-1 flex flex-col min-h-0">
                   <div className="text-center font-bold py-1 border-b border-black bg-white">
                     &lt;귀가/외출&gt;
@@ -392,7 +391,6 @@ export default function DisplayPage() {
                 </div>
               </div>
 
-              {/* 오른쪽: 인원 카드 2개 */}
               <div className="flex-1 flex flex-col gap-3 h-full min-h-0">
                 <div className="bg-white border border-gray-300 rounded-md px-3 py-3 flex-1 flex flex-col">
                   <div className="text-base font-semibold mb-3 text-center">
