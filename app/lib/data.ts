@@ -11,7 +11,7 @@ export type Status =
   | "방과후수업"
   | "동아리 활동"
   | "교내활동"
-  | "보건실 요양"
+  | "화장실"
   | "상담"
   | "기타";
 
@@ -43,6 +43,10 @@ export type SchedulerPlan = {
   slot: string;
   items: SchedulerItem[];
 };
+
+/* ─────────────────────────────── */
+/* 전역 데이터 (메모리 유지용)     */
+/* ─────────────────────────────── */
 
 const g = globalThis as unknown as {
   __schoolData?: {
@@ -100,15 +104,23 @@ if (!g.__schoolData) {
   };
 }
 
+/* ─────────────────────────────── */
+/* export 되는 데이터 포인터        */
+/* ─────────────────────────────── */
+
 export const students = g.__schoolData.students;
 export const teacherUsers = g.__schoolData.teacherUsers;
 export const schedulerStore = g.__schoolData.schedulerStore;
 export const schedulerEnabledRef = g.__schoolData;
 
-// 이건 남겨두기만. 이제 여기서 직접 안 부를 거야.
-export function ensureDailyReset() {
+/* ─────────────────────────────── */
+/* 함수 정의                        */
+/* ─────────────────────────────── */
+
+// 하루 한 번, 오전 8시 이후 전체 재실화
+export async function ensureDailyReset() {
   const now = new Date();
-  const todayStr = now.toISOString().slice(0, 10);
+  const todayStr = now.toISOString().slice(0, 10); // YYYY-MM-DD
   const hour = now.getHours();
 
   if (hour >= 8 && g.__schoolData!.lastDailyReset !== todayStr) {
@@ -117,5 +129,18 @@ export function ensureDailyReset() {
       s.reason = "";
     }
     g.__schoolData!.lastDailyReset = todayStr;
+    console.log("[ensureDailyReset] executed:", todayStr);
   }
+}
+
+// 학생 전체 반환
+export async function getAllStudents() {
+  return g.__schoolData!.students;
+}
+
+// 특정 학생 업데이트
+export async function updateStudent(id: string, updates: Partial<Student>) {
+  const t = g.__schoolData!.students.find((s) => s.id === id);
+  if (!t) return;
+  Object.assign(t, updates);
 }

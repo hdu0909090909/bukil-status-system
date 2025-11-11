@@ -14,7 +14,7 @@ const STATUS_LIST = [
   "방과후수업",
   "동아리 활동",
   "교내활동",
-  "화장실",
+  "보건실 요양",
   "상담",
   "기타",
 ] as const;
@@ -24,13 +24,13 @@ type Status = (typeof STATUS_LIST)[number];
 type Student = {
   id: string;
   name: string;
-  status: Status | string;
+  status: string;
   reason: string;
   approved: boolean;
   seatId?: string;
 };
 
-// 자리 좌표
+// 좌표
 const SEAT_POS: Record<string, { x: number; y: number }> = {
   "11115": { x: 40, y: 20 },
   "11130": { x: 140, y: 20 },
@@ -60,7 +60,6 @@ const SEAT_POS: Record<string, { x: number; y: number }> = {
   "11116": { x: 440, y: 230 },
 
   "11104": { x: 40, y: 300 },
-  "11122": { x: 140, y: 300 },
   "11109": { x: 240, y: 300 },
   "11113": { x: 340, y: 300 },
 };
@@ -77,43 +76,12 @@ function statusToPlace(
   return "etc";
 }
 
-function getDayKeyByDate(
-  d: Date
-): "mon" | "tue" | "wed" | "thu" | "fri" | null {
-  const day = d.getDay();
-  switch (day) {
-    case 1:
-      return "mon";
-    case 2:
-      return "tue";
-    case 3:
-      return "wed";
-    case 4:
-      return "thu";
-    case 5:
-      return "fri";
-    default:
-      return null;
-  }
-}
-
-function getSlotByDate(
-  d: Date
-): "8교시" | "야간 1차시" | "야간 2차시" | null {
-  const minutes = d.getHours() * 60 + d.getMinutes();
-
-  if (minutes >= 16 * 60 + 50 && minutes < 18 * 60) return "8교시";
-  if (minutes >= 19 * 60 + 10 && minutes < 21 * 60) return "야간 1차시";
-  if (minutes >= 21 * 60 + 15 && minutes < 23 * 60 + 30) return "야간 2차시";
-  return null;
-}
-
 export default function DisplayPage() {
   const [students, setStudents] = useState<Student[]>([]);
   const [now, setNow] = useState("");
   const lastAppliedRef = useRef<string | null>(null);
 
-  // 시간 표시
+  // 시계
   useEffect(() => {
     const tick = () => {
       const d = new Date();
@@ -129,51 +97,29 @@ export default function DisplayPage() {
     return () => clearInterval(t);
   }, []);
 
-  // ✅ 학생 데이터 주기적으로 가져오기 (읽기 전용)
+  // 학생 목록 불러오기 (3초마다)
   useEffect(() => {
     let alive = true;
 
     const load = async () => {
-      const res = await fetch("/api/students", { cache: "no-store" });
+      // ✅ 캐시 무효화를 위해 ts 쿼리 추가
+      const res = await fetch(`/api/students?ts=${Date.now()}`, {
+        cache: "no-store",
+      });
       if (!res.ok) return;
       const data: Student[] = await res.json();
       if (alive) setStudents(sortById(data));
     };
 
     load();
-    const t = setInterval(load, 2000);
+    const t = setInterval(load, 3000);
     return () => {
       alive = false;
       clearInterval(t);
     };
   }, []);
 
-  // 스케줄 자동 적용
-  useEffect(() => {
-    const checkAndApply = async () => {
-      const d = new Date();
-      const dayKey = getDayKeyByDate(d);
-      const slot = getSlotByDate(d);
-      if (!dayKey || !slot) return;
-
-      const key = `${dayKey}|${slot}`;
-      if (lastAppliedRef.current === key) return;
-
-      await fetch("/api/scheduler/apply", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ day: dayKey, slot }),
-      });
-
-      lastAppliedRef.current = key;
-    };
-
-    checkAndApply();
-    const t = setInterval(checkAndApply, 30_000);
-    return () => clearInterval(t);
-  }, []);
-
-  // 디스플레이에서 수정 가능하도록(이건 네가 원래 쓰던 거 유지)
+  // 학생 개별 수정
   const saveStudent = async (id: string, updates: Partial<Student>) => {
     setStudents((prev) =>
       sortById(prev.map((s) => (s.id === id ? { ...s, ...updates } : s)))
@@ -185,7 +131,7 @@ export default function DisplayPage() {
     });
   };
 
-  // 일괄 재실 버튼은 남겨둠
+  // 일괄 재실
   const resetAllToPresent = async () => {
     const updated = students.map((s) => ({
       ...s,
@@ -194,7 +140,6 @@ export default function DisplayPage() {
     }));
     setStudents(sortById(updated));
 
-    // 서버도 맞춰줌
     await Promise.all(
       students.map((s) =>
         fetch("/api/students", {
@@ -206,7 +151,6 @@ export default function DisplayPage() {
     );
   };
 
-  // 분류
   const classroomStudents = students.filter(
     (s) => statusToPlace(s.status) === "classroom" && s.seatId
   );
@@ -274,60 +218,55 @@ export default function DisplayPage() {
                 </tr>
               </thead>
               <tbody>
-                {students
-                  .slice()
-                  .sort((a, b) => Number(a.id) - Number(b.id))
-                  .map((s) => (
-                    <tr key={s.id} className="border-b last:border-b-0">
-                      <td className="px-2 py-1">{s.id}</td>
-                      <td className="px-2 py-1 truncate">{s.name}</td>
-                      <td className="px-2 py-1">
-                        <select
-                          value={s.status}
-                          onChange={(e) =>
-                            saveStudent(s.id, {
-                              status: e.target.value as Status,
-                            })
-                          }
-                          className="border rounded px-1 py-[1px] text-[11px] w-full"
-                        >
-                          {STATUS_LIST.map((st) => (
-                            <option key={st} value={st}>
-                              {st}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-2 py-1">
-                        <input
-                          value={s.reason}
-                          onChange={(e) =>
-                            saveStudent(s.id, { reason: e.target.value })
-                          }
-                          className="border rounded px-1 py-[1px] text-[11px] w-full"
-                          placeholder="사유 입력"
-                        />
-                      </td>
-                      <td className="px-2 py-1">
-                        <button
-                          disabled
-                          className={`text-[11px] px-2 py-[2px] rounded w-full ${
-                            s.approved
-                              ? "bg-green-500 text-white"
-                              : "bg-gray-300"
-                          }`}
-                        >
-                          {s.approved ? "O" : "X"}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                {students.map((s) => (
+                  <tr key={s.id} className="border-b last:border-b-0">
+                    <td className="px-2 py-1">{s.id}</td>
+                    <td className="px-2 py-1 truncate">{s.name}</td>
+                    <td className="px-2 py-1">
+                      <select
+                        value={s.status}
+                        onChange={(e) =>
+                          saveStudent(s.id, {
+                            status: e.target.value as Status,
+                          })
+                        }
+                        className="border rounded px-1 py-[1px] text-[11px] w-full"
+                      >
+                        {STATUS_LIST.map((st) => (
+                          <option key={st} value={st}>
+                            {st}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-2 py-1">
+                      <input
+                        value={s.reason}
+                        onChange={(e) =>
+                          saveStudent(s.id, { reason: e.target.value })
+                        }
+                        className="border rounded px-1 py-[1px] text-[11px] w-full"
+                        placeholder="사유 입력"
+                      />
+                    </td>
+                    <td className="px-2 py-1">
+                      <button
+                        disabled
+                        className={`text-[11px] px-2 py-[2px] rounded w-full ${
+                          s.approved ? "bg-green-500 text-white" : "bg-gray-300"
+                        }`}
+                      >
+                        {s.approved ? "O" : "X"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
         </div>
 
-        {/* 오른쪽 전체 */}
+        {/* 오른쪽 */}
         <div className="flex-1 flex flex-col gap-4 min-h-0">
           <div className="flex gap-4 min-h-[360px]">
             {/* 교실 */}
@@ -352,10 +291,10 @@ export default function DisplayPage() {
               </div>
             </div>
 
-            {/* 오른쪽: 미디어/귀가 + 인원 */}
+            {/* 오른쪽 묶음 */}
             <div className="flex-1 flex gap-3 min-h-0 h-[420px]">
-              {/* 왼쪽 세로 */}
               <div className="w-[360px] flex flex-col gap-3 h-full min-h-0">
+                {/* 미디어스페이스 */}
                 <div className="border-2 border-black flex-1 flex flex-col min-h-0">
                   <div className="text-center font-bold py-1 border-b border-black bg-white">
                     &lt;미디어스페이스&gt;
@@ -372,6 +311,7 @@ export default function DisplayPage() {
                   </div>
                 </div>
 
+                {/* 귀가/외출 */}
                 <div className="border-2 border-black flex-1 flex flex-col min-h-0">
                   <div className="text-center font-bold py-1 border-b border-black bg-white">
                     &lt;귀가/외출&gt;
@@ -389,7 +329,7 @@ export default function DisplayPage() {
                 </div>
               </div>
 
-              {/* 오른쪽 인원 카드 */}
+              {/* 인원 카드 */}
               <div className="flex-1 flex flex-col gap-3 h-full min-h-0">
                 <div className="bg-white border border-gray-300 rounded-md px-3 py-3 flex-1 flex flex-col">
                   <div className="text-base font-semibold mb-3 text-center">
@@ -469,7 +409,9 @@ export default function DisplayPage() {
                             )}
                             <div
                               className={`text-[10px] ${
-                                s.approved ? "text-blue-600" : "text-red-500"
+                                s.approved
+                                  ? "text-blue-600"
+                                  : "text-red-500"
                               }`}
                             >
                               {s.approved ? "허가됨" : "미허가"}

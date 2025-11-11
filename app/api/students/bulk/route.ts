@@ -1,6 +1,8 @@
 // app/api/students/bulk/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { getStudents, saveStudents } from "@/app/lib/store";
+import { getStudents, saveStudents, type Student } from "@/app/lib/store";
+
+export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
@@ -34,7 +36,12 @@ export async function POST(req: NextRequest) {
     }
 
     await saveStudents(students);
-    return NextResponse.json({ ok: true }, { status: 200 });
+
+    // 교원 페이지가 이걸로 자기 상태를 덮어쓸 수 있게 전체를 돌려준다
+    return NextResponse.json(
+      { ok: true, students: students.sort((a, b) => Number(a.id) - Number(b.id)) },
+      { status: 200 }
+    );
   } catch (err) {
     console.error("bulk update error", err);
     return NextResponse.json(
