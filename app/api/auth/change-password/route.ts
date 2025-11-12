@@ -1,20 +1,17 @@
 // app/api/auth/change-password/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { students, teacherUsers } from "@/app/lib/data";
+import { redis } from "@/app/lib/redis";
+import { ensureSeed, STUDENTS_KEY, TEACHERS_KEY } from "@/app/lib/seed";
 
-// POST /api/auth/change-password
-// body 예시:
-// { role: "student", id: "11101", oldPassword: "12345678", newPassword: "abcd1234" }
+// POST body: { role: "student"|"teacher", id: string, oldPassword: string, newPassword: string }
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    await ensureSeed();
 
-    // 프런트에서 oldPassword/newPassword로 보내지만
-    // 혹시 oldPw/newPw로 오는 경우도 대비
+    const body = await req.json();
     const role = body.role as "student" | "teacher" | undefined;
     const id = body.id as string | undefined;
-    const oldPassword =
-      body.oldPassword ?? body.oldPw ?? body.currentPassword ?? "";
+    const oldPassword = body.oldPassword ?? body.oldPw ?? body.currentPassword ?? "";
     const newPassword = body.newPassword ?? body.newPw ?? "";
 
     if (!role || !id || !newPassword) {
@@ -24,60 +21,39 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 학생 비밀번호 변경
     if (role === "student") {
-      const stu = students.find((s) => s.id === id);
-      if (!stu) {
-        return NextResponse.json(
-          { ok: false, message: "학생을 찾을 수 없습니다." },
-          { status: 404 }
-        );
+      const list = ((await redis.get(STUDENTS_KEY)) as any[]) ?? [];
+      const idx = list.findIndex((s) => s.id === id);
+      if (idx === -1) {
+        return NextResponse.json({ ok: false, message: "학생을 찾을 수 없습니다." }, { status: 404 });
       }
-
-      // 학생은 초기 비번이 없을 수도 있으니 기본값 12345678
-      const currentPw = stu.password ?? "12345678";
+      const currentPw = list[idx].password ?? "12345678";
       if (oldPassword && oldPassword !== currentPw) {
-        return NextResponse.json(
-          { ok: false, message: "현재 비밀번호가 일치하지 않습니다." },
-          { status: 401 }
-        );
+        return NextResponse.json({ ok: false, message: "현재 비밀번호가 일치하지 않습니다." }, { status: 401 });
       }
-
-      stu.password = newPassword;
-      return NextResponse.json({ ok: true }, { status: 200 });
+      list[idx].password = newPassword;
+      await redis.set(STUDENTS_KEY, list);
+      return NextResponse.json({ ok: true });
     }
 
-    // 교원 비밀번호 변경
     if (role === "teacher") {
-      const teacher = teacherUsers.find((t) => t.id === id);
-      if (!teacher) {
-        return NextResponse.json(
-          { ok: false, message: "교원을 찾을 수 없습니다." },
-          { status: 404 }
-        );
+      const list = ((await redis.get(TEACHERS_KEY)) as any[]) ?? [];
+      const idx = list.findIndex((t) => t.id === id);
+      if (idx === -1) {
+        return NextResponse.json({ ok: false, message: "교원을 찾을 수 없습니다." }, { status: 404 });
       }
-
-      if (oldPassword && oldPassword !== teacher.password) {
-        return NextResponse.json(
-          { ok: false, message: "현재 비밀번호가 일치하지 않습니다." },
-          { status: 401 }
-        );
+      const currentPw = list[idx].password;
+      if (oldPassword && oldPassword !== currentPw) {
+        return NextResponse.json({ ok: false, message: "현재 비밀번호가 일치하지 않습니다." }, { status: 401 });
       }
-
-      teacher.password = newPassword;
-      return NextResponse.json({ ok: true }, { status: 200 });
+      list[idx].password = newPassword;
+      await redis.set(TEACHERS_KEY, list);
+      return NextResponse.json({ ok: true });
     }
 
-    // role이 student/teacher가 아닐 때
-    return NextResponse.json(
-      { ok: false, message: "알 수 없는 role입니다." },
-      { status: 400 }
-    );
+    return NextResponse.json({ ok: false, message: "알 수 없는 role입니다." }, { status: 400 });
   } catch (err) {
     console.error("[change-password] error:", err);
-    return NextResponse.json(
-      { ok: false, message: "서버 내부 오류" },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, message: "서버 내부 오류" }, { status: 500 });
   }
 }
