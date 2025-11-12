@@ -36,14 +36,14 @@ export default function TeacherPage() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
 
-  // ✅ reason 입력 드래프트(입력 중 값) — 폴링이 덮어쓰지 않게
+  // 사유 입력 드래프트(입력 중 값) — 폴링 덮어쓰기 방지
   const [reasonDraft, setReasonDraft] = useState<Record<string, string>>({});
-  // ✅ 어떤 학생이 현재 입력 중인지(포커스) 표시 → 입력 중엔 서버 값을 화면에 반영하지 않음
+  // 현재 사유 입력 중인 학생 id 모음
   const editingReason = useRef<Set<string>>(new Set());
-  // ✅ status/approved 최근 수정 보호(5초): 폴링 덮어쓰기 방지
+  // status/approved 최근 수정 보호(5초): 폴링 덮어쓰기 방지
   const editedRef = useRef<Record<string, number>>({});
 
-  // ✅ 스케줄러 ON/OFF 상태
+  // 스케줄러 ON/OFF 상태
   const [schedEnabled, setSchedEnabled] = useState<boolean>(true);
 
   // 첫 로드
@@ -67,7 +67,6 @@ export default function TeacherPage() {
   // 폴링(상태 탭에서만)
   useEffect(() => {
     if (tab !== "status") return;
-    let stop = false;
 
     const tick = async () => {
       const res = await fetch("/api/students", { cache: "no-store" });
@@ -82,17 +81,16 @@ export default function TeacherPage() {
           const wasEdited = editedRef.current[sv.id];
           const keepLocal = wasEdited && now - wasEdited < 5000;
 
-          // 1) reason: 입력 중이거나 드래프트가 있으면 드래프트 우선
+          // reason: 입력 중이거나 드래프트가 있으면 드래프트 우선
           const localDraft = reasonDraft[sv.id];
           const isTyping = editingReason.current.has(sv.id);
           const reason = (isTyping || localDraft !== undefined) ? (localDraft ?? "") : sv.reason;
 
-          // 2) status/approved: 최근 5초 내 로컬 수정이면 기존 화면 값 유지
+          // status/approved: 최근 5초 내 로컬 수정이면 화면 값 유지
           if (keepLocal) {
             const local = prevMap.get(sv.id) ?? sv;
             return { ...sv, reason, status: local.status, approved: local.approved };
           }
-
           // 기본: 서버 값 반영 + reason만 위 규칙
           return { ...sv, reason };
         });
@@ -101,13 +99,10 @@ export default function TeacherPage() {
 
     tick();
     const t = setInterval(tick, 3000);
-    return () => {
-      stop = true;
-      clearInterval(t);
-    };
+    return () => clearInterval(t);
   }, [tab, reasonDraft]);
 
-  // 공통 PATCH (배열/단건 모두 지원하는 /api/students)
+  // 공통 PATCH (단건 / 배열 모두)
   const patch = async (payload: any) => {
     await fetch("/api/students", {
       method: "PATCH",
@@ -117,19 +112,19 @@ export default function TeacherPage() {
     });
   };
 
-  // 상태/허가 즉시 저장 (낙관적 업데이트 + 5초 보호)
+  // 상태/허가 즉시 저장 (낙관적 + 5초 보호)
   const saveStudent = async (id: string, updates: Partial<Student>) => {
     editedRef.current[id] = Date.now();
     setStudents((prev) =>
       sortById(prev.map((s) => (s.id === id ? { ...s, ...updates } : s)))
     );
-    await patch({ id, ...updates });
+    await patch({ id, ...updates }); // 변경된 학생만 PATCH
   };
 
-  // ✅ 사유 저장: 포커스 아웃에서만 서버 반영
+  // 사유 저장: 포커스 아웃 또는 버튼 클릭 시 서버 반영
   const saveReason = async (s: Student) => {
     const draft = reasonDraft[s.id] ?? "";
-    await patch({ id: s.id, reason: draft });
+    await patch({ id: s.id, reason: draft }); // 단건 PATCH
     // 저장 후 드래프트 제거
     setReasonDraft((m) => {
       const { [s.id]: _, ...rest } = m;
@@ -139,7 +134,7 @@ export default function TeacherPage() {
     setTimeout(() => setMessage(""), 2500);
   };
 
-  // 일괄 버튼
+  // 일괄 재실(전체)
   const resetAllToPresent = async () => {
     const payload = students.map((s) => ({ id: s.id, status: "재실" as const, reason: "" }));
     // 낙관적
@@ -149,7 +144,7 @@ export default function TeacherPage() {
     await patch(payload);
   };
 
-  // ✅ “귀가/외출/호실자습 제외” 일괄 재실
+  // “귀가/외출/호실자습 제외” 일괄 재실
   const resetAllExceptOut = async () => {
     const targets = students.filter((s) => !["귀가", "외출", "호실자습"].includes(s.status));
     if (targets.length === 0) return;
@@ -176,7 +171,7 @@ export default function TeacherPage() {
     await patch(payload);
   };
 
-  // ✅ 스케줄러 ON/OFF 토글
+  // 스케줄러 ON/OFF 토글
   const toggleScheduler = async () => {
     const next = !schedEnabled;
     setSchedEnabled(next); // 낙관적
@@ -230,7 +225,7 @@ export default function TeacherPage() {
           </div>
 
           <div className="flex items-center gap-3 text-sm text-gray-700">
-            {/* ✅ 스케줄러 ON/OFF 토글 */}
+            {/* 스케줄러 ON/OFF 토글 */}
             <button
               onClick={toggleScheduler}
               className={`px-3 py-1 rounded ${schedEnabled ? "bg-green-500 text-white" : "bg-gray-300"}`}
@@ -281,12 +276,9 @@ export default function TeacherPage() {
                   <button onClick={resetAllToPresent} className="px-3 py-1 text-xs bg-blue-500 text-white rounded">
                     일괄 재실(전체)
                   </button>
-
-                  {/* ✅ 귀/외/호 제외 재실 */}
                   <button onClick={resetAllExceptOut} className="px-3 py-1 text-xs bg-indigo-500 text-white rounded">
                     귀/외/호 제외 재실
                   </button>
-
                   <button onClick={approveAll} className="px-3 py-1 text-xs bg-green-500 text-white rounded">
                     일괄 허가
                   </button>
@@ -438,7 +430,7 @@ export default function TeacherPage() {
 }
 
 /* ──────────────────────────────── */
-/* 스케줄러 탭 — 기존 그대로 */
+/* 스케줄러 탭 — 네 베이스 유지 + 적용 버튼만 기존대로 */
 /* ──────────────────────────────── */
 function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
   const [day, setDay] = useState<DayKey>("mon");
@@ -455,8 +447,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
       if (res.ok) {
         const data = await res.json();
         const items =
-          (data.items as Array<{ studentId: string; name: string; status: string; reason: string }>) ??
-          [];
+          (data.items as Array<{ studentId: string; name: string; status: string; reason: string }>) ?? [];
         if (items.length > 0) {
           setRows(items.sort((a, b) => Number(a.studentId) - Number(b.studentId)));
           setLoading(false);
@@ -480,14 +471,20 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
     load();
   }, [day, slot]);
 
-  const setAllNoChange = () => setRows((prev) => prev.map((r) => ({ ...r, status: "변경안함", reason: "" })));
+  const setAllNoChange = () =>
+    setRows((prev) => prev.map((r) => ({ ...r, status: "변경안함", reason: "" })));
 
   const fillFromCurrent = async () => {
     const res = await fetch("/api/students", { cache: "no-store" });
     const students: Student[] = await res.json();
     setRows(
       students
-        .map((s) => ({ studentId: s.id, name: s.name, status: s.status ?? "변경안함", reason: s.reason ?? "" }))
+        .map((s) => ({
+          studentId: s.id,
+          name: s.name,
+          status: s.status ?? "변경안함",
+          reason: s.reason ?? "",
+        }))
         .sort((a, b) => Number(a.studentId) - Number(b.studentId))
     );
   };
@@ -516,7 +513,10 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
     }
   };
 
-  const updateRow = (studentId: string, part: Partial<{ status: string; reason: string }>) => {
+  const updateRow = (
+    studentId: string,
+    part: Partial<{ status: string; reason: string }>
+  ) => {
     setRows((prev) => prev.map((r) => (r.studentId === studentId ? { ...r, ...part } : r)));
   };
 

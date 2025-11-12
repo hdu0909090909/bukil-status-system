@@ -1,3 +1,4 @@
+// app/display/page.tsx
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -27,7 +28,7 @@ export default function DisplayPage(){
   const [now, setNow] = useState("");
   const [toast, setToast] = useState("");
 
-  // 최근 로컬 수정 보호(5초): 서버 폴링이 덮어쓰지 않게
+  // 최근 로컬 수정 보호(5초)
   const editedRef = useRef<Record<string,number>>({});
 
   // 시계
@@ -43,7 +44,6 @@ export default function DisplayPage(){
 
   // 최초 + 폴링(3초)
   useEffect(()=> {
-    let stop=false;
     const load=async()=>{
       const res=await fetch("/api/students",{ cache:"no-store" });
       if(!res.ok) return;
@@ -56,28 +56,24 @@ export default function DisplayPage(){
         const prevMap=new Map(prev.map(s=>[s.id,s]));
         return sortedServer.map(sv=>{
           const t=edited[sv.id];
-          if(t && now-t<5000) return prevMap.get(sv.id) ?? sv; // 로컬 수정 5초 보호
+          if(t && now-t<5000) return prevMap.get(sv.id) ?? sv;
           return sv;
         });
       });
     };
     load();
     const t=setInterval(load,3000);
-    return ()=>{ stop=true; clearInterval(t); };
+    return ()=>clearInterval(t);
   },[]);
 
-  // 단건 PATCH (상태 즉시 반영)
-  const patchOne = async (id:string, updates: Partial<Pick<Student,"status">>) => {
+  // 단건 PATCH (상태만)
+  const patchStatus = async (id:string, status: Status) => {
     editedRef.current[id]=Date.now();
-    setStudents(prev=>sortById(prev.map(s=>s.id===id?{...s,...updates}:s)));
-    const res=await fetch("/api/students",{
+    setStudents(prev=>sortById(prev.map(s=>s.id===id?{...s,status}:s)));
+    await fetch("/api/students",{
       method:"PATCH", headers:{ "Content-Type":"application/json" }, cache:"no-store",
-      body: JSON.stringify({ id, ...updates }),
+      body: JSON.stringify({ id, status }),
     });
-    if(res.ok){
-      const data=await res.json();
-      if(Array.isArray(data?.students)) setStudents(sortById(data.students));
-    }
   };
 
   // 행별 사유 저장(PATCH: reason만)
@@ -89,30 +85,27 @@ export default function DisplayPage(){
       body: JSON.stringify({ id, reason: stu.reason }),
     });
     if(res.ok){
-      const data=await res.json();
-      if(Array.isArray(data?.students)) setStudents(sortById(data.students));
+      const data=await res.json().catch(()=>null);
+      if(data && Array.isArray(data.students)) setStudents(sortById(data.students));
       setToast(`${stu.name}(${stu.id}) 사유 저장 완료`);
-      setTimeout(()=>setToast(""), 2000);
     }else{
       setToast("사유 저장 실패");
-      setTimeout(()=>setToast(""), 2000);
     }
+    setTimeout(()=>setToast(""), 2000);
   };
 
-  // 전체 재실(표 헤더 버튼 / 즉시 서버 반영)
+  // 전체 재실
   const resetAllToPresent = async () => {
     const payload = students.map(s=>({ id:s.id, status:"재실", reason:"" }));
-    // 낙관적 반영
     setStudents(prev=>sortById(prev.map(s=>({ ...s, status:"재실", reason:"" }))));
     await fetch("/api/students",{
       method:"PATCH", headers:{ "Content-Type":"application/json" }, cache:"no-store",
       body: JSON.stringify(payload),
     });
-    setToast("전체 재실로 변경되었습니다.");
-    setTimeout(()=>setToast(""), 2000);
+    setToast("전체 재실로 변경되었습니다."); setTimeout(()=>setToast(""), 2000);
   };
 
-  // 분류
+  // 분류 및 카운트
   const classroomStudents = students.filter(s=>statusToPlace(s.status)==="classroom" && s.seatId);
   const mediaStudents = students.filter(s=>statusToPlace(s.status)==="mediaspace").sort((a,b)=>Number(a.id)-Number(b.id));
   const goneStudents = students.filter(s=>statusToPlace(s.status)==="gone").sort((a,b)=>Number(a.id)-Number(b.id));
@@ -161,6 +154,8 @@ export default function DisplayPage(){
                   <th className="py-2 px-2 text-left w-24">상태</th>
                   <th className="py-2 px-2 text-left">사유</th>
                   <th className="py-2 px-2 text-left w-20">사유 저장</th>
+                  {/* 허가(O/X)는 표시만, 토글 없음 */}
+                  <th className="py-2 px-2 text-left w-12">허가</th>
                 </tr>
               </thead>
               <tbody>
@@ -171,7 +166,7 @@ export default function DisplayPage(){
                     <td className="px-2 py-1">
                       <select
                         value={s.status}
-                        onChange={(e)=>patchOne(s.id,{ status:e.target.value as Status })}
+                        onChange={(e)=>patchStatus(s.id, e.target.value as Status)}
                         className="border rounded px-1 py-[1px] text-[11px] w-full"
                       >
                         {STATUS_LIST.map(st=><option key={st} value={st}>{st}</option>)}
@@ -181,7 +176,6 @@ export default function DisplayPage(){
                       <input
                         value={s.reason}
                         onChange={(e)=>{
-                          // 사유는 로컬만 변경, 저장 버튼으로 서버 반영
                           editedRef.current[s.id]=Date.now();
                           setStudents(prev=>sortById(prev.map(p=>p.id===s.id?{...p, reason:e.target.value}:p)));
                         }}
@@ -198,6 +192,15 @@ export default function DisplayPage(){
                         저장
                       </button>
                     </td>
+                    <td className="px-2 py-1">
+                      {/* 읽기 전용 배지 */}
+                      <span
+                        className={`inline-block w-full text-center text-[11px] px-2 py-[2px] rounded ${s.approved?"bg-green-500 text-white":"bg-gray-300 text-gray-800"}`}
+                        title="허가는 교원 페이지에서만 변경 가능합니다"
+                      >
+                        {s.approved ? "O" : "X"}
+                      </span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -205,7 +208,7 @@ export default function DisplayPage(){
           </div>
         </div>
 
-        {/* 오른쪽 전체 레이아웃(교실/미디어/귀가/인원/기타) */}
+        {/* 오른쪽 레이아웃 */}
         <div className="flex-1 flex flex-col gap-4 min-h-0">
           <div className="flex gap-4 min-h-[360px]">
             {/* 교실 */}
@@ -227,7 +230,7 @@ export default function DisplayPage(){
 
             {/* 오른쪽: 미디어/귀가 + 인원 */}
             <div className="flex-1 flex gap-3 min-h-0 h-[420px]">
-              <div className="w[360px] flex flex-col gap-3 h-full min-h-0">
+              <div className="w-[360px] flex flex-col gap-3 h-full min-h-0">
                 <div className="border-2 border-black flex-1 flex flex-col min-h-0">
                   <div className="text-center font-bold py-1 border-b border-black bg-white">&lt;미디어스페이스&gt;</div>
                   <div className="p-2 flex flex-col gap-2 overflow-y-auto">
