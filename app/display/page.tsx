@@ -56,7 +56,7 @@ export default function DisplayPage(){
         const prevMap=new Map(prev.map(s=>[s.id,s]));
         return sortedServer.map(sv=>{
           const t=edited[sv.id];
-          if(t && now-t<5000) return prevMap.get(sv.id) ?? sv;
+          if(t && now-t<5000) return prevMap.get(sv.id) ?? sv; // 로컬 수정 5초 보호
           return sv;
         });
       });
@@ -66,8 +66,8 @@ export default function DisplayPage(){
     return ()=>{ stop=true; clearInterval(t); };
   },[]);
 
-  // 단건 PATCH (상태/허가 즉시 반영)
-  const patchOne = async (id:string, updates: Partial<Student>) => {
+  // 단건 PATCH (상태 즉시 반영)
+  const patchOne = async (id:string, updates: Partial<Pick<Student,"status">>) => {
     editedRef.current[id]=Date.now();
     setStudents(prev=>sortById(prev.map(s=>s.id===id?{...s,...updates}:s)));
     const res=await fetch("/api/students",{
@@ -99,7 +99,7 @@ export default function DisplayPage(){
     }
   };
 
-  // ★ 디스플레이 전원 재실(표 헤더의 버튼 / 즉시 서버 반영)
+  // 전체 재실(표 헤더 버튼 / 즉시 서버 반영)
   const resetAllToPresent = async () => {
     const payload = students.map(s=>({ id:s.id, status:"재실", reason:"" }));
     // 낙관적 반영
@@ -128,7 +128,7 @@ export default function DisplayPage(){
 
   return (
     <div className="min-h-screen bg-white p-4 flex flex-col gap-4">
-      {/* 상단바(현재시각 + 토스트만) */}
+      {/* 상단바 */}
       <div className="flex justify-between items-center border-b pb-2">
         <h2 className="text-lg font-semibold">표시 화면</h2>
         <div className="flex items-center gap-3">
@@ -161,7 +161,6 @@ export default function DisplayPage(){
                   <th className="py-2 px-2 text-left w-24">상태</th>
                   <th className="py-2 px-2 text-left">사유</th>
                   <th className="py-2 px-2 text-left w-20">사유 저장</th>
-                  <th className="py-2 px-2 text-left w-12">허가</th>
                 </tr>
               </thead>
               <tbody>
@@ -199,14 +198,6 @@ export default function DisplayPage(){
                         저장
                       </button>
                     </td>
-                    <td className="px-2 py-1">
-                      <button
-                        onClick={()=>patchOne(s.id,{ approved: !s.approved })}
-                        className={`text-[11px] px-2 py-[2px] rounded w-full ${s.approved?"bg-green-500 text-white":"bg-gray-300"}`}
-                      >
-                        {s.approved ? "O" : "X"}
-                      </button>
-                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -236,7 +227,7 @@ export default function DisplayPage(){
 
             {/* 오른쪽: 미디어/귀가 + 인원 */}
             <div className="flex-1 flex gap-3 min-h-0 h-[420px]">
-              <div className="w-[360px] flex flex-col gap-3 h-full min-h-0">
+              <div className="w[360px] flex flex-col gap-3 h-full min-h-0">
                 <div className="border-2 border-black flex-1 flex flex-col min-h-0">
                   <div className="text-center font-bold py-1 border-b border-black bg-white">&lt;미디어스페이스&gt;</div>
                   <div className="p-2 flex flex-col gap-2 overflow-y-auto">
