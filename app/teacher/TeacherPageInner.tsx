@@ -100,7 +100,7 @@ export default function TeacherPage() {
     tick();
     const t = setInterval(tick, 3000);
     return () => clearInterval(t);
-  }, [tab, reasonDraft]);
+  }, [tab]);
 
   // 공통 PATCH (단건 / 배열 모두)
   const patch = async (payload: any) => {
@@ -334,25 +334,18 @@ export default function TeacherPage() {
                             </td>
                             <td className="px-2 py-1">
                               <input
-                                value={inputValue}
-                                onFocus={() => {
-                                  editingReason.current.add(s.id);
-                                  // 드래프트 없으면 현재 값을 드래프트로 초기화(커서 점프 방지)
-                                  setReasonDraft((m) => (m[s.id] === undefined ? { ...m, [s.id]: s.reason } : m));
-                                }}
-                                onChange={(e) => {
-                                  const v = e.target.value;
-                                  setReasonDraft((m) => ({ ...m, [s.id]: v }));
-                                }}
-                                onBlur={async () => {
-                                  try {
-                                    await saveReason(s);
-                                  } finally {
-                                    editingReason.current.delete(s.id);
-                                  }
-                                }}
-                                className="border rounded px-1 py-[2px] text-sm w-full bg-white"
-                                placeholder="여기에 사유 입력"
+                               value={inputValue}
+                               onFocus={() => {
+                               editingReason.current.add(s.id);
+                               setReasonDraft(m => (m[s.id] === undefined ? { ...m, [s.id]: s.reason } : m));
+                             }}
+                             onChange={e => setReasonDraft(m => ({ ...m, [s.id]: e.target.value }))}
+                                  onBlur={() => {
+                                     editingReason.current.delete(s.id);
+                             }}
+
+                             className="border rounded px-1 py-[2px] text-sm w-full bg-white"
+                             placeholder="여기에 사유 입력"
                               />
                             </td>
                             <td className="px-2 py-1">
