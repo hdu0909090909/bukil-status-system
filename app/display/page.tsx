@@ -80,10 +80,11 @@ function statusToPlace(
 export default function DisplayPage() {
   const [students, setStudents] = useState<Student[]>([]);
   const [now, setNow] = useState("");
+  const [saveMsg, setSaveMsg] = useState("");
 
-  // 내가 디스플레이에서 직접 손댄 애들
+  // 디스플레이에서 직접 손댄 애들(id)
   const dirtyIdsRef = useRef<Set<string>>(new Set());
-  // 언제 손댔는지
+  // 손 댄 시각
   const dirtyTimeRef = useRef<Record<string, number>>({});
 
   // 시계
@@ -153,24 +154,73 @@ export default function DisplayPage() {
     dirtyTimeRef.current[id] = Date.now();
   };
 
+  const clearDirty = (id: string) => {
+    dirtyIdsRef.current.delete(id);
+    delete dirtyTimeRef.current[id];
+  };
+
   const updateLocalStudent = (id: string, updates: Partial<Student>) => {
     setStudents((prev) =>
       sortById(prev.map((s) => (s.id === id ? { ...s, ...updates } : s)))
     );
   };
 
-  // 디스플레이에서 바꾸는 순간 서버에도 바로 반영
+  // 상태/허가 바꾸면 바로 서버로
   const patchStudent = async (id: string, updates: Partial<Student>) => {
-    // 화면 먼저
     updateLocalStudent(id, updates);
-    // dirty 표시
     markDirty(id);
-    // 서버로 한 명만
     await fetch("/api/students", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, ...updates }),
     });
+  };
+
+  // 사유 저장 버튼
+  const saveReason = async (stu: Student) => {
+    markDirty(stu.id); // 저장하는 순간은 dirty로
+    await fetch("/api/students", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: stu.id, reason: stu.reason }),
+    });
+    clearDirty(stu.id); // 성공했으니 폴링이 덮어도 됨
+    setSaveMsg(`${stu.name} 사유 저장됨`);
+    setTimeout(() => setSaveMsg(""), 2000);
+  };
+
+  // 일괄 재실
+  const resetAllToPresent = async () => {
+    const now = Date.now();
+    const updated = students.map((s) => ({
+      ...s,
+      status: "재실" as const,
+      reason: "",
+    }));
+    setStudents(sortById(updated));
+
+    const newSet = new Set<string>();
+    const newTimes: Record<string, number> = {};
+    updated.forEach((s) => {
+      newSet.add(s.id);
+      newTimes[s.id] = now;
+    });
+    dirtyIdsRef.current = newSet;
+    dirtyTimeRef.current = newTimes;
+
+    await Promise.all(
+      updated.map((s) =>
+        fetch("/api/students", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: s.id,
+            status: "재실",
+            reason: "",
+          }),
+        })
+      )
+    );
   };
 
   // 분류
@@ -209,56 +259,20 @@ export default function DisplayPage() {
   }).length;
   const outCampus = totalCount - inCampus;
 
-  // 일괄 재실 (이건 여러 명이라 서버에 여러 번 날려야 함)
-  const resetAllToPresent = async () => {
-    const now = Date.now();
-    // 화면 먼저
-    const updated = students.map((s) => ({
-      ...s,
-      status: "재실" as const,
-      reason: "",
-    }));
-    setStudents(sortById(updated));
-
-    // dirty 표시
-    const newSet = new Set<string>();
-    const newTimes: Record<string, number> = {};
-    updated.forEach((s) => {
-      newSet.add(s.id);
-      newTimes[s.id] = now;
-    });
-    dirtyIdsRef.current = newSet;
-    dirtyTimeRef.current = newTimes;
-
-    // 서버에도 한 명씩
-    await Promise.all(
-      updated.map((s) =>
-        fetch("/api/students", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            id: s.id,
-            status: "재실",
-            reason: "",
-          }),
-        })
-      )
-    );
-  };
-
   return (
     <div className="min-h-screen bg-white p-4 flex flex-col gap-4">
       {/* 상단바 */}
       <div className="flex justify-between items-center border-b pb-2">
         <h2 className="text-lg font-semibold">표시 화면</h2>
         <div className="flex items-center gap-3">
+          {saveMsg && <div className="text-sm text-blue-600">{saveMsg}</div>}
           <div className="text-sm text-gray-600">{now}</div>
         </div>
       </div>
 
       <div className="flex gap-4 flex-1 min-h-0">
         {/* 왼쪽 표 */}
-        <div className="w-[460px] border-2 border-black rounded-md flex flex-col min-h-0">
+        <div className="w-[520px] border-2 border-black rounded-md flex flex-col min-h-0">
           <div className="flex items-center justify-between bg-gray-100 px-3 py-2 font-bold border-b border-black">
             <span>현재 상태</span>
             <button
@@ -276,6 +290,7 @@ export default function DisplayPage() {
                   <th className="py-2 px-2 text-left w-16">이름</th>
                   <th className="py-2 px-2 text-left w-24">상태</th>
                   <th className="py-2 px-2 text-left">사유</th>
+                  <th className="py-2 px-2 text-left w-20">사유 저장</th>
                   <th className="py-2 px-2 text-left w-12">허가</th>
                 </tr>
               </thead>
@@ -304,12 +319,22 @@ export default function DisplayPage() {
                     <td className="px-2 py-1">
                       <input
                         value={s.reason}
-                        onChange={(e) =>
-                          patchStudent(s.id, { reason: e.target.value })
-                        }
+                        onChange={(e) => {
+                          // 로컬에서만 바꿔두기
+                          updateLocalStudent(s.id, { reason: e.target.value });
+                          markDirty(s.id);
+                        }}
                         className="border rounded px-1 py-[1px] text-[11px] w-full"
                         placeholder="사유 입력"
                       />
+                    </td>
+                    <td className="px-2 py-1">
+                      <button
+                        onClick={() => saveReason(s)}
+                        className="text-[11px] px-2 py-[2px] rounded bg-orange-400 text-white w-full"
+                      >
+                        저장
+                      </button>
                     </td>
                     <td className="px-2 py-1">
                       <button
@@ -330,9 +355,8 @@ export default function DisplayPage() {
           </div>
         </div>
 
-        {/* 오른쪽 레이아웃은 네 코드 그대로 */}
+        {/* 오른쪽 전체 (원래 있던 레이아웃) */}
         <div className="flex-1 flex flex-col gap-4 min-h-0">
-          {/* 위쪽: 교실 + 오른쪽 묶음 */}
           <div className="flex gap-4 min-h-[360px]">
             {/* 교실 */}
             <div className="relative border-2 border-black w-[650px] h-[420px] flex flex-col">
