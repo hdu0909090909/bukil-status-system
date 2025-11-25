@@ -30,8 +30,8 @@ const initialStudents = [
   { id: "11126", name: "최배겸", status: "재실", reason: "", approved: true, seatId: "11126", password: "12345678" },
 
   // 3줄
-  { id: "11127", name: "최준성", status: "재실", reason: "", approved: true, seatId: "11127", password: "12345678" },
   { id: "11128", name: "함주완", status: "재실", reason: "", approved: true, seatId: "11128", password: "12345678" },
+  { id: "11127", name: "최준성", status: "재실", reason: "", approved: true, seatId: "11127", password: "12345678" },
   { id: "11103", name: "김서준", status: "재실", reason: "", approved: true, seatId: "11103", password: "12345678" },
   { id: "11107", name: "김주헌", status: "재실", reason: "", approved: true, seatId: "11107", password: "12345678" },
 
@@ -56,6 +56,7 @@ const initialTeachers = [
   { id: "이도현", name: "이도현 학생", password: "admin" },
   { id: "함주완", name: "함주완 학생", password: "admin" },
   { id: "최배겸", name: "최배겸 학생", password: "admin" },
+  { id: "최준성", name: "최준성 학생", password: "admin" },
 ];
 
 /* ────────────────────────────────
