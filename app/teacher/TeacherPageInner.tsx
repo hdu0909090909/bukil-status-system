@@ -277,7 +277,7 @@ export default function TeacherPage() {
                     일괄 재실(전체)
                   </button>
                   <button onClick={resetAllExceptOut} className="px-3 py-1 text-xs bg-indigo-500 text-white rounded">
-                    귀/외/호 제외 재실
+                    귀가/외출/호자 제외 재실
                   </button>
                   <button onClick={approveAll} className="px-3 py-1 text-xs bg-green-500 text-white rounded">
                     일괄 허가

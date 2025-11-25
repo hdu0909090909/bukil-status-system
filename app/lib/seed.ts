@@ -5,9 +5,12 @@ export const STUDENTS_KEY = "school:students";
 export const TEACHERS_KEY = "school:teachers";
 export const SCHED_KEY_PREFIX = "school:scheduler:";
 
+// 새로 추가
+export const SCHED_ENABLED_KEY = "school:scheduler:enabled";
+export const DAILY_RESET_KEY = "school:daily-reset";
+
 /* ────────────────────────────────
    초기 학생 데이터
-   (전주형, 정민건 제거 완료)
 ──────────────────────────────── */
 const initialStudents = [
   // 1줄
@@ -60,7 +63,13 @@ const initialTeachers = [
    Redis에 기본값 보장
 ──────────────────────────────── */
 export async function ensureSeed() {
-  const [students, teachers] = await redis.mget([STUDENTS_KEY, TEACHERS_KEY]);
+  const [students, teachers, schedEnabled] = await redis.mget([
+    STUDENTS_KEY,
+    TEACHERS_KEY,
+    SCHED_ENABLED_KEY,
+  ]);
+
   if (!students) await redis.set(STUDENTS_KEY, initialStudents);
   if (!teachers) await redis.set(TEACHERS_KEY, initialTeachers);
+  if (schedEnabled === null) await redis.set(SCHED_ENABLED_KEY, true); // 기본 ON
 }

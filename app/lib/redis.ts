@@ -1,45 +1,35 @@
-// app/lib/redis.ts
+import { Redis } from "@upstash/redis";
+
+const client = new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL!,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+});
+
 type Json = any;
 
-type KV = {
-  get(key: string): Promise<Json | null>;
-  set(key: string, value: Json): Promise<"OK">;
-  del(key: string): Promise<number>;
-  mget(keys: string[]): Promise<(Json | null)[]>;
-  mset(pairs: Record<string, Json>): Promise<"OK">;
-};
-
-const g = globalThis as any;
-if (!g.__kv) g.__kv = new Map<string, string>();
-
-function toStr(v: Json) {
-  return typeof v === "string" ? v : JSON.stringify(v);
-}
-function toJson(v: string | undefined): Json | null {
-  if (v === undefined) return null;
-  try {
-    return JSON.parse(v);
-  } catch {
-    return v ?? null;
-  }
-}
-
-export const redis: KV = {
-  async get(key) {
-    return toJson(g.__kv.get(key));
+export const redis = {
+  async get(key: string): Promise<Json | null> {
+    return await client.get(key);
   },
-  async set(key, value) {
-    g.__kv.set(key, toStr(value));
+
+  async set(key: string, value: Json): Promise<"OK"> {
+    await client.set(key, value);
     return "OK";
   },
-  async del(key) {
-    return g.__kv.delete(key) ? 1 : 0;
+
+  async del(key: string): Promise<number> {
+    await client.del(key);
+    return 1;
   },
-  async mget(keys) {
-    return keys.map((k: string) => toJson(g.__kv.get(k)));
+
+  async mget(keys: string[]): Promise<(Json | null)[]> {
+    return await client.mget(...keys);
   },
-  async mset(pairs) {
-    for (const [k, v] of Object.entries(pairs)) g.__kv.set(k, toStr(v));
+
+  // 🔥 여기만 이렇게 고쳐 쓰면 됨
+  async mset(pairs: Record<string, Json>): Promise<"OK"> {
+    const entries = Object.entries(pairs);
+    await Promise.all(entries.map(([key, value]) => client.set(key, value)));
     return "OK";
   },
 };
