@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 const STATUS_LIST = [
   "재실","미디어스페이스","귀가","외출","호실자습","아단관 강당3","아단관 강의실",
-  "방과후수업","동아리 활동","교내활동","보건실 요양","상담","기타",
+  "방과후수업","동아리 활동","교내활동","화장실","상담","기타",
 ] as const;
 
 type Status = (typeof STATUS_LIST)[number];
