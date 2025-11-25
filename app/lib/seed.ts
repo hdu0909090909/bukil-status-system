@@ -56,7 +56,6 @@ const initialTeachers = [
   { id: "이도현", name: "이도현 학생", password: "admin" },
   { id: "함주완", name: "함주완 학생", password: "admin" },
   { id: "최배겸", name: "최배겸 학생", password: "admin" },
-  { id: "최준성", name: "최준성 학생", password: "admin" },
 ];
 
 /* ────────────────────────────────
