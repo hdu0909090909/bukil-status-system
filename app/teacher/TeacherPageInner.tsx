@@ -37,6 +37,24 @@ type TimeSlot = "8교시" | "야간 1차시" | "야간 2차시";
 const sortById = <T extends { id: string }>(list: T[]) =>
   [...list].sort((a, b) => Number(a.id) - Number(b.id));
 
+/** 상태별 색상 (디스플레이 페이지 톤 맞춰서) */
+const statusColor = (status: string) => {
+  switch (status) {
+    case "재실":
+      return "bg-emerald-500/15 text-emerald-200 border-emerald-500/50";
+    case "미디어스페이스":
+      return "bg-sky-500/15 text-sky-200 border-sky-500/50";
+    case "귀가":
+      return "bg-rose-500/18 text-rose-200 border-rose-500/60";
+    case "외출":
+      return "bg-orange-500/18 text-orange-200 border-orange-500/60";
+    case "호실자습":
+      return "bg-violet-500/18 text-violet-200 border-violet-500/60";
+    default:
+      return "bg-slate-500/10 text-slate-200 border-slate-500/40";
+  }
+};
+
 export default function TeacherPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -407,25 +425,32 @@ export default function TeacherPage() {
                             </td>
                             <td className="px-2 py-1.5 text-sm">{s.name}</td>
                             <td className="px-2 py-1.5">
-                              <select
-                                value={s.status}
-                                onChange={(e) =>
-                                  saveStudent(s.id, {
-                                    status: e.target.value as Status,
-                                  })
-                                }
-                                className="border border-slate-700/70 rounded-full px-2 py-[6px] text-xs w-full bg-slate-950/70 text-slate-100 focus:outline-none focus:ring-1 focus:ring-sky-400/70"
+                              {/* 상태 select 색상 래핑 */}
+                              <div
+                                className={`w-full rounded-full border px-1 ${statusColor(
+                                  s.status
+                                )}`}
                               >
-                                {STATUS_LIST.map((st) => (
-                                  <option
-                                    key={st}
-                                    value={st}
-                                    className="bg-slate-900"
-                                  >
-                                    {st}
-                                  </option>
-                                ))}
-                              </select>
+                                <select
+                                  value={s.status}
+                                  onChange={(e) =>
+                                    saveStudent(s.id, {
+                                      status: e.target.value as Status,
+                                    })
+                                  }
+                                  className="w-full bg-transparent border-none outline-none text-xs py-[6px] px-1 pr-5 appearance-none"
+                                >
+                                  {STATUS_LIST.map((st) => (
+                                    <option
+                                      key={st}
+                                      value={st}
+                                      className="bg-slate-900 text-slate-100"
+                                    >
+                                      {st}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
                             </td>
                             <td className="px-2 py-1.5">
                               <input
@@ -778,26 +803,33 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
                   </td>
                   <td className="px-2 py-1.5 text-sm">{r.name}</td>
                   <td className="px-2 py-1.5">
-                    <select
-                      value={r.status}
-                      onChange={(e) =>
-                        updateRow(r.studentId, { status: e.target.value })
-                      }
-                      className="border border-slate-700/70 rounded-full px-2 py-[6px] text-xs w-full bg-slate-950/70 text-slate-100 focus:outline-none focus:ring-1 focus:ring-sky-400/70"
+                    {/* 스케줄러 상태 select도 래핑해서 색 적용 */}
+                    <div
+                      className={`w-full rounded-full border px-1 ${statusColor(
+                        r.status
+                      )}`}
                     >
-                      <option value="변경안함" className="bg-slate-900">
-                        변경안함
-                      </option>
-                      {STATUS_LIST.map((st) => (
-                        <option
-                          key={st}
-                          value={st}
-                          className="bg-slate-900"
-                        >
-                          {st}
+                      <select
+                        value={r.status}
+                        onChange={(e) =>
+                          updateRow(r.studentId, { status: e.target.value })
+                        }
+                        className="w-full bg-transparent border-none outline-none text-xs py-[6px] px-1 pr-5 appearance-none"
+                      >
+                        <option value="변경안함" className="bg-slate-900 text-slate-100">
+                          변경안함
                         </option>
-                      ))}
-                    </select>
+                        {STATUS_LIST.map((st) => (
+                          <option
+                            key={st}
+                            value={st}
+                            className="bg-slate-900 text-slate-100"
+                          >
+                            {st}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </td>
                   <td className="px-2 py-1.5">
                     <input
