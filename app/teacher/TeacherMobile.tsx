@@ -203,7 +203,7 @@ export default function TeacherMobile() {
           </span>
           <span className="text-base font-semibold flex items-center gap-1.5">
             <span className="inline-flex h-4 w-4 rounded-full bg-emerald-500/20 border border-emerald-300/70 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
-            모바일 출결 관리
+            모바일 교원 관리 페이지
           </span>
         </div>
         <button

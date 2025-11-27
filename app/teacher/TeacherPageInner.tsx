@@ -267,7 +267,7 @@ export default function TeacherDesktop() {
               </div>
               <div className="text-lg font-semibold flex items-center gap-2">
                 <span className="inline-flex h-5 w-5 rounded-full bg-emerald-500/20 border border-emerald-400/60 shadow-[0_0_10px_rgba(16,185,129,0.8)]" />
-                출결·스케줄 관리
+                교원 관리 페이지
               </div>
             </div>
 
