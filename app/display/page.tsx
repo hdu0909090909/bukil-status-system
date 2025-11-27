@@ -206,7 +206,7 @@ export default function DisplayPage(){
 
       <div className="flex gap-4 flex-1 min-h-0">
         {/* 왼쪽: 현재 상태 테이블 */}
-        <div className="h-[1130px] w-[560px] flex flex-col bg-slate-900/70 border border-slate-700/70 rounded-2xl shadow-[0_0_40px_rgba(15,23,42,0.8)] backdrop-blur-md overflow-hidden">
+        <div className="h-[1135px] w-[560px] flex flex-col bg-slate-900/70 border border-slate-700/70 rounded-2xl shadow-[0_0_40px_rgba(15,23,42,0.8)] backdrop-blur-md overflow-hidden">
           {/* 헤더 */}
           <div className="flex items-center px-4 py-3 border-b border-slate-700/70 bg-gradient-to-r from-slate-900/80 via-slate-900/40 to-slate-900/80">
             <span className="text-base font-semibold flex items-center gap-2">
