@@ -14,9 +14,9 @@ type Student = { id:string; name:string; status:string; reason:string; approved:
 const SEAT_POS: Record<string,{x:number;y:number}> = {
   "11115":{x:40,y:20},"11130":{x:140,y:20},"11125":{x:240,y:20},"11106":{x:340,y:20},"11124":{x:440,y:20},"11110":{x:540,y:20},
   "11119":{x:40,y:90},"11108":{x:140,y:90},"11120":{x:240,y:90},"11118":{x:340,y:90},"11102":{x:440,y:90},"11126":{x:540,y:90},
-  "11128":{x:40,y:160},"11127":{x:140,y:160},"11121":{x:240,y:160},"11103":{x:340,y:160},"11107":{x:440,y:160},"11111":{x:540,y:160},
-  "11112":{x:40,y:230},"11101":{x:140,y:230},"11129":{x:240,y:230},"11117":{x:340,y:230},"11116":{x:440,y:230},
-  "11104":{x:40,y:300},"11122":{x:140,y:300},"11109":{x:240,y:300},"11113":{x:340,y:300},
+  "11128":{x:40,y:160},"11127":{x:140,y:160},"11121":{x:240,y:160},"11103":{x:340,y:160},"11107":{x:440,y:160},"11116":{x:540,y:160},
+  "11112":{x:40,y:230},"11101":{x:140,y:230},"11129":{x:240,y:230},"11117":{x:340,y:230},"11109":{x:440,y:230},"11113":{x:540,y:230},
+  "11104":{x:40,y:300},"11122":{x:140,y:300},
 };
 
 const sortById = <T extends {id:string}>(list:T[]) => [...list].sort((a,b)=>Number(a.id)-Number(b.id));
@@ -53,6 +53,7 @@ export default function DisplayPage(){
   const [students, setStudents] = useState<Student[]>([]);
   const [now, setNow] = useState("");
   const [toast, setToast] = useState("");
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const editedRef = useRef<Record<string,number>>({});
 
@@ -68,6 +69,25 @@ export default function DisplayPage(){
     const t=setInterval(tick,30_000);
     return ()=>clearInterval(t);
   },[]);
+
+  // 전체화면 상태 추적
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const handler = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener("fullscreenchange", handler);
+    return () => document.removeEventListener("fullscreenchange", handler);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (typeof document === "undefined") return;
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen?.().catch(() => {});
+    } else {
+      document.exitFullscreen?.().catch(() => {});
+    }
+  };
 
   // 폴링 1초
   useEffect(()=> {
@@ -157,17 +177,26 @@ export default function DisplayPage(){
             실시간으로 교실·미디어스페이스·귀가/외출/호실자습 상태를 모니터링합니다.
           </p>
         </div>
+
         <div className="flex flex-col items-end gap-1">
           <span className="text-[11px] text-slate-400 uppercase tracking-[0.2em]">
             LAST UPDATE
           </span>
           <span className="text-sm font-mono text-slate-200">{now}</span>
+
+          {/* 전체화면 토글 버튼 */}
+          <button
+            onClick={toggleFullscreen}
+            className="mt-2 text-[11px] px-3 py-1.5 rounded-full border border-slate-600 bg-slate-900/80 hover:bg-slate-800/90 transition font-semibold text-slate-200"
+          >
+            {isFullscreen ? "창 모드로" : "전체화면"}
+          </button>
         </div>
       </div>
 
-      <div className="flex gap-4 h-[calc(100vh-96px)] min-h-[540px]">
+      <div className="flex gap-4 flex-1 min-h-0">
         {/* 왼쪽: 현재 상태 테이블 */}
-        <div className="w-[560px] flex flex-col bg-slate-900/70 border border-slate-700/70 rounded-2xl shadow-[0_0_40px_rgba(15,23,42,0.8)] backdrop-blur-md overflow-hidden">
+        <div className="h-[1300px] w-[560px] flex flex-col bg-slate-900/70 border border-slate-700/70 rounded-2xl shadow-[0_0_40px_rgba(15,23,42,0.8)] backdrop-blur-md overflow-hidden">
           {/* 헤더 */}
           <div className="flex items-center px-4 py-3 border-b border-slate-700/70 bg-gradient-to-r from-slate-900/80 via-slate-900/40 to-slate-900/80">
             <span className="text-base font-semibold flex items-center gap-2">
@@ -260,7 +289,7 @@ export default function DisplayPage(){
                           className={`inline-flex justify-center items-center w-full text-xs px-2 py-[6px] rounded-full border ${
                             s.approved
                               ? "bg-emerald-500/20 border-emerald-400/60 text-emerald-200"
-                              : "bg-slate-800/80 border-slate-600/80 text-slate-200"
+                              : "bg-rose-500/20 border-rose-400/60 text-rose-200"
                           }`}
                           title="허가는 교원 페이지에서만 변경 가능합니다"
                         >
@@ -283,7 +312,7 @@ export default function DisplayPage(){
         </div>
 
         {/* 오른쪽: 교실 + 요약 + 기타 */}
-        <div className="flex-1 flex flex-col gap-4">
+        <div className="h-[1300] flex-1 flex flex-col gap-4">
           <div className="flex gap-4 h-[45%] min-h-[320px]">
             {/* 교실 */}
             <div className="relative flex flex-col w-[650px] max-w-[650px] bg-slate-900/70 border border-slate-700/70 rounded-2xl shadow-[0_0_40px_rgba(15,23,42,0.8)] overflow-hidden">
@@ -448,7 +477,7 @@ export default function DisplayPage(){
                     <div className="space-y-1.5">
                       {etcByStatus[st].slice().sort((a,b)=>Number(a.id)-Number(b.id)).map(s=>(
                         <div key={s.id} className="text-[13px] leading-tight">
-                          <div className="flex items-center justify-between">
+                          <div className="flex items-center justify_between">
                             <span>{s.name}</span>
                             <span className="text-[11px] text-slate-200/80 font-mono">
                               {s.id}

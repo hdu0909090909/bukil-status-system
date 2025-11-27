@@ -55,7 +55,7 @@ const statusColor = (status: string) => {
   }
 };
 
-export default function TeacherDesktop() {
+export default function TeacherPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const userParam = searchParams.get("user") || "윤인하";
@@ -383,7 +383,7 @@ export default function TeacherDesktop() {
                 </div>
               </div>
 
-              <div className="max-h_[460px] max-h-[460px] overflow-y-auto rounded-xl border border-slate-800/80 bg-slate-950/40">
+              <div className="max-h-[460px] overflow-y-auto rounded-xl border border-slate-800/80 bg-slate-950/40">
                 <table className="w-full text-sm">
                   <thead className="bg-slate-900/95 sticky top-0 z-10 border-b border-slate-800/80">
                     <tr className="text-xs text-slate-300">
@@ -816,10 +816,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
                         }
                         className="w-full bg-transparent border-none outline-none text-xs py-[6px] px-1 pr-5 appearance-none"
                       >
-                        <option
-                          value="변경안함"
-                          className="bg-slate-900 text-slate-100"
-                        >
+                        <option value="변경안함" className="bg-slate-900 text-slate-100">
                           변경안함
                         </option>
                         {STATUS_LIST.map((st) => (
