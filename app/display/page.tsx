@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 const STATUS_LIST = [
   "재실","미디어스페이스","귀가","외출","호실자습","아단관 강당3","아단관 강의실",
-  "방과후수업","동아리 활동","교내활동","화장실","상담","기타",
+  "방과후수업","동아리 활동","교내활동","상담","화장실","물","기타",
 ] as const;
 
 type Status = (typeof STATUS_LIST)[number];
@@ -44,6 +44,16 @@ const statusColor = (status: string) => {
       return "bg-orange-500/18 text-orange-200 border-orange-500/60";
     case "호실자습":
       return "bg-violet-500/18 text-violet-200 border-violet-500/60";
+    case "화장실" :
+      return "bg-sky-500/50 text-sky-200 border-sky-500/60";
+    case "물" :
+      return "bg-sky-500/50 text-sky-200 border-sky-500/60";
+    case "아단관 강당3" :
+      return "bg-orange-500/18 text-orange-200 border-orange-500/50";
+    case "아단관 강의실" :
+      return "bg-orange-500/18 text-orange-200 border-orange-500/50";
+    case "상담" :
+      return "bg-pink-500/18 text-pink-200 border-pink-500/50";
     default:
       return "bg-slate-500/10 text-slate-200 border-slate-500/40";
   }
@@ -196,7 +206,7 @@ export default function DisplayPage(){
 
       <div className="flex gap-4 flex-1 min-h-0">
         {/* 왼쪽: 현재 상태 테이블 */}
-        <div className="h-[1150px] w-[560px] flex flex-col bg-slate-900/70 border border-slate-700/70 rounded-2xl shadow-[0_0_40px_rgba(15,23,42,0.8)] backdrop-blur-md overflow-hidden">
+        <div className="h-[1130px] w-[560px] flex flex-col bg-slate-900/70 border border-slate-700/70 rounded-2xl shadow-[0_0_40px_rgba(15,23,42,0.8)] backdrop-blur-md overflow-hidden">
           {/* 헤더 */}
           <div className="flex items-center px-4 py-3 border-b border-slate-700/70 bg-gradient-to-r from-slate-900/80 via-slate-900/40 to-slate-900/80">
             <span className="text-base font-semibold flex items-center gap-2">
@@ -312,7 +322,7 @@ export default function DisplayPage(){
         </div>
 
         {/* 오른쪽: 교실 + 요약 + 기타 */}
-        <div className="h-[1150] flex-1 flex flex-col gap-4">
+        <div className="h-[1130] flex-1 flex flex-col gap-4">
           <div className="flex gap-4 h-[32%] min-h-[320px]">
             {/* 교실 */}
             <div className="relative flex flex-col w-[650px] max-w-[650px] bg-slate-900/70 border border-slate-700/70 rounded-2xl shadow-[0_0_40px_rgba(15,23,42,0.8)] overflow-hidden">

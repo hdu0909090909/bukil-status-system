@@ -15,8 +15,9 @@ const STATUS_LIST = [
   "방과후수업",
   "동아리 활동",
   "교내활동",
-  "화장실",
   "상담",
+  "화장실",
+  "물",
   "기타",
 ] as const;
 
@@ -50,6 +51,16 @@ const statusColor = (status: string) => {
       return "bg-orange-500/18 text-orange-200 border-orange-500/60";
     case "호실자습":
       return "bg-violet-500/18 text-violet-200 border-violet-500/60";
+    case "화장실" :
+      return "bg-sky-500/50 text-sky-200 border-sky-500/60";
+    case "물" :
+      return "bg-sky-500/50 text-sky-200 border-sky-500/60";
+    case "아단관 강당3" :
+      return "bg-orange-500/18 text-orange-200 border-orange-500/50";
+    case "아단관 강의실" :
+      return "bg-orange-500/18 text-orange-200 border-orange-500/50";
+    case "상담" :
+      return "bg-pink-500/18 text-pink-200 border-pink-500/50";
     default:
       return "bg-slate-500/10 text-slate-200 border-slate-500/40";
   }
