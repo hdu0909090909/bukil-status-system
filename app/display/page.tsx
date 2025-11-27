@@ -196,7 +196,7 @@ export default function DisplayPage(){
 
       <div className="flex gap-4 flex-1 min-h-0">
         {/* 왼쪽: 현재 상태 테이블 */}
-        <div className="h-[1300px] w-[560px] flex flex-col bg-slate-900/70 border border-slate-700/70 rounded-2xl shadow-[0_0_40px_rgba(15,23,42,0.8)] backdrop-blur-md overflow-hidden">
+        <div className="h-[1200px] w-[560px] flex flex-col bg-slate-900/70 border border-slate-700/70 rounded-2xl shadow-[0_0_40px_rgba(15,23,42,0.8)] backdrop-blur-md overflow-hidden">
           {/* 헤더 */}
           <div className="flex items-center px-4 py-3 border-b border-slate-700/70 bg-gradient-to-r from-slate-900/80 via-slate-900/40 to-slate-900/80">
             <span className="text-base font-semibold flex items-center gap-2">
@@ -312,8 +312,8 @@ export default function DisplayPage(){
         </div>
 
         {/* 오른쪽: 교실 + 요약 + 기타 */}
-        <div className="h-[1300] flex-1 flex flex-col gap-4">
-          <div className="flex gap-4 h-[45%] min-h-[320px]">
+        <div className="h-[1200] flex-1 flex flex-col gap-4">
+          <div className="flex gap-4 h-[32%] min-h-[320px]">
             {/* 교실 */}
             <div className="relative flex flex-col w-[650px] max-w-[650px] bg-slate-900/70 border border-slate-700/70 rounded-2xl shadow-[0_0_40px_rgba(15,23,42,0.8)] overflow-hidden">
               <div className="flex items-center justify-between px-4 py-2 border-b border-slate-700/70 bg-slate-900/80">
@@ -350,7 +350,7 @@ export default function DisplayPage(){
 
             {/* 오른쪽: 미디어/귀가+호실자습 + 인원 요약 */}
             <div className="flex-1 flex flex-col gap-3">
-              <div className="flex gap-3 h-1/2 min-h-[160px]">
+              <div className="flex gap-3 h-2/3 min-h-[160px]">
                 {/* 미디어 */}
                 <div className="flex-1 bg-slate-900/70 border border-slate-700/70 rounded-2xl shadow-[0_0_28px_rgba(15,23,42,0.8)] flex flex-col overflow-hidden">
                   <div className="px-3 py-2 border-b border-slate-700/70 bg-slate-900/80 text-sm font-semibold text-center">
@@ -400,7 +400,7 @@ export default function DisplayPage(){
               </div>
 
               {/* 인원 카드들 */}
-              <div className="flex gap-3 h-1/2 min-h-[160px]">
+              <div className="flex gap-3 h-1/3 min-h-[160px]">
                 {/* 인원 (교실·미디어스페이스) */}
                 <div className="flex-1 bg-slate-900/70 border border-slate-700/70 rounded-2xl shadow-[0_0_28px_rgba(15,23,42,0.8)] px-4 py-3 flex flex-col">
                   <div className="flex items-center justify-between mb-3">
