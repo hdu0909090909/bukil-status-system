@@ -4,30 +4,71 @@
 import { useEffect, useRef, useState } from "react";
 
 const STATUS_LIST = [
-  "재실","미디어스페이스","귀가","외출","호실자습","아단관 강당3","아단관 강의실",
-  "방과후수업","동아리 활동","교내활동","상담","화장실","물","기타",
+  "재실",
+  "미디어스페이스",
+  "귀가",
+  "외출",
+  "호실자습",
+  "아단관 강당3",
+  "아단관 강의실",
+  "방과후수업",
+  "동아리 활동",
+  "교내활동",
+  "상담",
+  "화장실",
+  "물",
+  "기타",
 ] as const;
 
 type Status = (typeof STATUS_LIST)[number];
-type Student = { id:string; name:string; status:string; reason:string; approved:boolean; seatId?:string };
-
-const SEAT_POS: Record<string,{x:number;y:number}> = {
-  "11115":{x:40,y:20},"11130":{x:140,y:20},"11125":{x:240,y:20},"11106":{x:340,y:20},"11124":{x:440,y:20},"11110":{x:540,y:20},
-  "11119":{x:40,y:90},"11108":{x:140,y:90},"11120":{x:240,y:90},"11118":{x:340,y:90},"11102":{x:440,y:90},"11126":{x:540,y:90},
-  "11128":{x:40,y:160},"11127":{x:140,y:160},"11121":{x:240,y:160},"11103":{x:340,y:160},"11107":{x:440,y:160},"11116":{x:540,y:160},
-  "11112":{x:40,y:230},"11101":{x:140,y:230},"11129":{x:240,y:230},"11117":{x:340,y:230},"11109":{x:440,y:230},"11113":{x:540,y:230},
-  "11104":{x:40,y:300},"11122":{x:140,y:300},
+type Student = {
+  id: string;
+  name: string;
+  status: string;
+  reason: string;
+  approved: boolean;
+  seatId?: string | null;
 };
 
-const sortById = <T extends {id:string}>(list:T[]) => [...list].sort((a,b)=>Number(a.id)-Number(b.id));
+// 자리 번호(1~32) 레이아웃 – 교사 페이지랑 동일하게
+const SEAT_LAYOUT: (number | null)[][] = [
+  [1, 2, 11, 12, 21, 22],
+  [3, 4, 13, 14, 23, 24],
+  [5, 6, 15, 16, 25, 26],
+  [7, 8, 17, 18, 27, 28],
+  [9, 10, 19, 20, 29, 30],
+  [31, 32, null, null, null, null],
+];
+
+// 각 열/행별 좌표 (원래 아이콘 레이아웃 느낌 유지)
+const COLUMN_X = [40, 140, 240, 340, 440, 540];
+const ROW_Y = [20, 90, 160, 230, 300, 370];
+
+// seatId("1"~"32") → 좌표 매핑
+const buildSeatPos = (): Record<string, { x: number; y: number }> => {
+  const map: Record<string, { x: number; y: number }> = {};
+  SEAT_LAYOUT.forEach((row, rIdx) => {
+    row.forEach((seat, cIdx) => {
+      if (!seat) return;
+      map[String(seat)] = { x: COLUMN_X[cIdx], y: ROW_Y[rIdx] };
+    });
+  });
+  return map;
+};
+const SEAT_POS = buildSeatPos();
+
+const sortById = <T extends { id: string }>(list: T[]) =>
+  [...list].sort((a, b) => Number(a.id) - Number(b.id));
 
 // ✅ 호실자습도 gone 그룹으로 묶음
-const statusToPlace = (st:string):"classroom"|"mediaspace"|"gone"|"etc" =>
-  st==="재실"
+const statusToPlace = (
+  st: string
+): "classroom" | "mediaspace" | "gone" | "etc" =>
+  st === "재실"
     ? "classroom"
-    : st==="미디어스페이스"
+    : st === "미디어스페이스"
     ? "mediaspace"
-    : (st==="귀가" || st==="외출" || st==="호실자습")
+    : st === "귀가" || st === "외출" || st === "호실자습"
     ? "gone"
     : "etc";
 
@@ -44,41 +85,44 @@ const statusColor = (status: string) => {
       return "bg-orange-500/18 text-orange-200 border-orange-500/60";
     case "호실자습":
       return "bg-violet-500/18 text-violet-200 border-violet-500/60";
-    case "화장실" :
+    case "화장실":
       return "bg-sky-500/50 text-sky-200 border-sky-500/60";
-    case "물" :
+    case "물":
       return "bg-sky-500/50 text-sky-200 border-sky-500/60";
-    case "아단관 강당3" :
+    case "아단관 강당3":
       return "bg-orange-500/18 text-orange-200 border-orange-500/50";
-    case "아단관 강의실" :
+    case "아단관 강의실":
       return "bg-orange-500/18 text-orange-200 border-orange-500/50";
-    case "상담" :
+    case "상담":
       return "bg-pink-500/18 text-pink-200 border-pink-500/50";
     default:
       return "bg-slate-500/10 text-slate-200 border-slate-500/40";
   }
 };
 
-export default function DisplayPage(){
+export default function DisplayPage() {
   const [students, setStudents] = useState<Student[]>([]);
   const [now, setNow] = useState("");
   const [toast, setToast] = useState("");
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  const editedRef = useRef<Record<string,number>>({});
+  const editedRef = useRef<Record<string, number>>({});
 
   // 시계
-  useEffect(()=> {
-    const tick=()=>{
-      const d=new Date();
-      const yyyy=d.getFullYear(), mm=String(d.getMonth()+1).padStart(2,"0"), dd=String(d.getDate()).padStart(2,"0");
-      const hh=String(d.getHours()).padStart(2,"0"), mi=String(d.getMinutes()).padStart(2,"0");
+  useEffect(() => {
+    const tick = () => {
+      const d = new Date();
+      const yyyy = d.getFullYear(),
+        mm = String(d.getMonth() + 1).padStart(2, "0"),
+        dd = String(d.getDate()).padStart(2, "0");
+      const hh = String(d.getHours()).padStart(2, "0"),
+        mi = String(d.getMinutes()).padStart(2, "0");
       setNow(`${yyyy}-${mm}-${dd} ${hh}:${mi}`);
     };
     tick();
-    const t=setInterval(tick,30_000);
-    return ()=>clearInterval(t);
-  },[]);
+    const t = setInterval(tick, 30_000);
+    return () => clearInterval(t);
+  }, []);
 
   // 전체화면 상태 추적
   useEffect(() => {
@@ -100,78 +144,107 @@ export default function DisplayPage(){
   };
 
   // 폴링 1초
-  useEffect(()=> {
-    const load=async()=>{
-      const res=await fetch("/api/students",{ cache:"no-store" });
-      if(!res.ok) return;
-      const server:Student[]=await res.json();
-      const sortedServer=sortById(server);
-      const now=Date.now();
-      const edited=editedRef.current;
+  useEffect(() => {
+    const load = async () => {
+      const res = await fetch("/api/students", { cache: "no-store" });
+      if (!res.ok) return;
+      const server: Student[] = await res.json();
+      const sortedServer = sortById(server);
+      const now = Date.now();
+      const edited = editedRef.current;
 
-      setStudents(prev=>{
-        const prevMap=new Map(prev.map(s=>[s.id,s]));
-        return sortedServer.map(sv=>{
-          const t=edited[sv.id];
-          if(t && now-t<1000) return prevMap.get(sv.id) ?? sv;
+      setStudents((prev) => {
+        const prevMap = new Map(prev.map((s) => [s.id, s]));
+        return sortedServer.map((sv) => {
+          const t = edited[sv.id];
+          if (t && now - t < 1000) return prevMap.get(sv.id) ?? sv;
           return sv;
         });
       });
     };
     load();
-    const t=setInterval(load,1000);
-    return ()=>clearInterval(t);
-  },[]);
+    const t = setInterval(load, 1000);
+    return () => clearInterval(t);
+  }, []);
 
-  const patchStatus = async (id:string, status: Status) => {
-    editedRef.current[id]=Date.now();
-    setStudents(prev=>sortById(prev.map(s=>s.id===id?{...s,status}:s)));
-    await fetch("/api/students",{
-      method:"PATCH", headers:{ "Content-Type":"application/json" }, cache:"no-store",
+  const patchStatus = async (id: string, status: Status) => {
+    editedRef.current[id] = Date.now();
+    setStudents((prev) =>
+      sortById(prev.map((s) => (s.id === id ? { ...s, status } : s)))
+    );
+    await fetch("/api/students", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
       body: JSON.stringify({ id, status }),
     });
   };
 
-  const saveReason = async (id:string) => {
-    const stu = students.find(s=>s.id===id);
-    if(!stu) return;
+  const saveReason = async (id: string) => {
+    const stu = students.find((s) => s.id === id);
+    if (!stu) return;
     const res = await fetch("/api/students", {
-      method:"PATCH", headers:{ "Content-Type":"application/json" }, cache:"no-store",
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
       body: JSON.stringify({ id, reason: stu.reason }),
     });
-    if(res.ok){
-      const data=await res.json().catch(()=>null);
-      if(data && Array.isArray(data.students)) setStudents(sortById(data.students));
+    if (res.ok) {
+      const data = await res.json().catch(() => null);
+      if (data && Array.isArray(data.students))
+        setStudents(sortById(data.students));
       setToast(`${stu.name}(${stu.id}) 사유 저장 완료`);
-    }else{
+    } else {
       setToast("사유 저장 실패");
     }
-    setTimeout(()=>setToast(""), 2000);
+    setTimeout(() => setToast(""), 2000);
   };
 
   const resetAllToPresent = async () => {
-    const payload = students.map(s=>({ id:s.id, status:"재실", reason:"" }));
-    setStudents(prev=>sortById(prev.map(s=>({ ...s, status:"재실", reason:"" }))));
-    await fetch("/api/students",{
-      method:"PATCH", headers:{ "Content-Type":"application/json" }, cache:"no-store",
+    const payload = students.map((s) => ({
+      id: s.id,
+      status: "재실",
+      reason: "",
+    }));
+    setStudents((prev) =>
+      sortById(prev.map((s) => ({ ...s, status: "재실", reason: "" })))
+    );
+    await fetch("/api/students", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
       body: JSON.stringify(payload),
     });
     setToast("전체 재실로 변경되었습니다.");
-    setTimeout(()=>setToast(""), 2000);
+    setTimeout(() => setToast(""), 2000);
   };
 
-  const classroomStudents = students.filter(s=>statusToPlace(s.status)==="classroom" && s.seatId);
-  const mediaStudents = students.filter(s=>statusToPlace(s.status)==="mediaspace").sort((a,b)=>Number(a.id)-Number(b.id));
-  const goneStudents = students.filter(s=>statusToPlace(s.status)==="gone").sort((a,b)=>Number(a.id)-Number(b.id));
-  const etcStudents  = students.filter(s=>statusToPlace(s.status)==="etc").sort((a,b)=>Number(a.id)-Number(b.id));
+  const classroomStudents = students.filter(
+    (s) => statusToPlace(s.status) === "classroom" && s.seatId
+  );
+  const mediaStudents = students
+    .filter((s) => statusToPlace(s.status) === "mediaspace")
+    .sort((a, b) => Number(a.id) - Number(b.id));
+  const goneStudents = students
+    .filter((s) => statusToPlace(s.status) === "gone")
+    .sort((a, b) => Number(a.id) - Number(b.id));
+  const etcStudents = students
+    .filter((s) => statusToPlace(s.status) === "etc")
+    .sort((a, b) => Number(a.id) - Number(b.id));
 
-  const etcByStatus:Record<string,Student[]>= {};
-  for(const s of etcStudents){ (etcByStatus[s.status]??=([])).push(s); }
+  const etcByStatus: Record<string, Student[]> = {};
+  for (const s of etcStudents) {
+    (etcByStatus[s.status] ??= []).push(s);
+  }
 
-  const totalCount=students.length;
-  const inClassOrMedia = students.filter(s=>["재실","미디어스페이스"].includes(s.status)).length;
+  const totalCount = students.length;
+  const inClassOrMedia = students.filter((s) =>
+    ["재실", "미디어스페이스"].includes(s.status)
+  ).length;
   const outClassOrMedia = totalCount - inClassOrMedia;
-  const inCampus = students.filter(s=>!["귀가","외출","호실자습"].includes(s.status)).length;
+  const inCampus = students.filter(
+    (s) => !["귀가", "외출", "호실자습"].includes(s.status)
+  ).length;
   const outCampus = totalCount - inCampus;
 
   return (
@@ -184,7 +257,8 @@ export default function DisplayPage(){
             1-11 출결 현황
           </h1>
           <p className="text-sm text-slate-400 mt-1">
-            실시간으로 교실·미디어스페이스·귀가/외출/호실자습 상태를 모니터링합니다.
+            실시간으로 교실·미디어스페이스·귀가/외출/호실자습 상태를
+            모니터링합니다.
           </p>
         </div>
 
@@ -239,20 +313,32 @@ export default function DisplayPage(){
               <table className="w-full text-sm">
                 <thead className="sticky top-0 z-10 bg-slate-900/95 border-b border-slate-700/80 backdrop-blur">
                   <tr className="text-xs text-slate-300">
-                    <th className="py-2 px-3 text-left w-16 font-medium">학번</th>
-                    <th className="py-2 px-2 text-left w-16 font-medium">이름</th>
-                    <th className="py-2 px-2 text-left w-32 font-medium">상태</th>
+                    <th className="py-2 px-3 text-left w-16 font-medium">
+                      학번
+                    </th>
+                    <th className="py-2 px-2 text-left w-16 font-medium">
+                      이름
+                    </th>
+                    <th className="py-2 px-2 text-left w-32 font-medium">
+                      상태
+                    </th>
                     <th className="py-2 px-2 text-left font-medium">사유</th>
-                    <th className="py-2 px-2 text-center w-20 font-medium">사유 저장</th>
-                    <th className="py-2 px-2 text-center w-14 font-medium">허가</th>
+                    <th className="py-2 px-2 text-center w-20 font-medium">
+                      사유 저장
+                    </th>
+                    <th className="py-2 px-2 text-center w-14 font-medium">
+                      허가
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {students.map((s, idx)=>(
+                  {students.map((s, idx) => (
                     <tr
                       key={s.id}
                       className={`border-b border-slate-800/60 ${
-                        idx % 2 === 0 ? "bg-slate-900/40" : "bg-slate-900/25"
+                        idx % 2 === 0
+                          ? "bg-slate-900/40"
+                          : "bg-slate-900/25"
                       } hover:bg-slate-800/50 transition-colors`}
                     >
                       <td className="px-3 py-1.5 font-mono text-[13px] text-slate-200">
@@ -264,11 +350,19 @@ export default function DisplayPage(){
                       <td className="px-2 py-1.5">
                         <select
                           value={s.status}
-                          onChange={(e)=>patchStatus(s.id, e.target.value as Status)}
-                          className={`w-full text-xs px-2 py-[5px] rounded-full border bg-slate-900/80 outline-none focus:ring-1 focus:ring-sky-400/70 ${statusColor(s.status)}`}
+                          onChange={(e) =>
+                            patchStatus(s.id, e.target.value as Status)
+                          }
+                          className={`w-full text-xs px-2 py-[5px] rounded-full border bg-slate-900/80 outline-none focus:ring-1 focus:ring-sky-400/70 ${statusColor(
+                            s.status
+                          )}`}
                         >
-                          {STATUS_LIST.map(st=>(
-                            <option key={st} value={st} className="bg-slate-900">
+                          {STATUS_LIST.map((st) => (
+                            <option
+                              key={st}
+                              value={st}
+                              className="bg-slate-900"
+                            >
                               {st}
                             </option>
                           ))}
@@ -277,9 +371,17 @@ export default function DisplayPage(){
                       <td className="px-2 py-1.5">
                         <input
                           value={s.reason}
-                          onChange={(e)=>{
-                            editedRef.current[s.id]=Date.now();
-                            setStudents(prev=>sortById(prev.map(p=>p.id===s.id?{...p, reason:e.target.value}:p)));
+                          onChange={(e) => {
+                            editedRef.current[s.id] = Date.now();
+                            setStudents((prev) =>
+                              sortById(
+                                prev.map((p) =>
+                                  p.id === s.id
+                                    ? { ...p, reason: e.target.value }
+                                    : p
+                                )
+                              )
+                            );
                           }}
                           className="w-full text-xs px-2 py-[6px] rounded-full border border-slate-700/70 bg-slate-900/70 focus:outline-none focus:ring-1 focus:ring-emerald-400/60"
                           placeholder="사유 입력"
@@ -287,7 +389,7 @@ export default function DisplayPage(){
                       </td>
                       <td className="px-2 py-1.5">
                         <button
-                          onClick={()=>saveReason(s.id)}
+                          onClick={() => saveReason(s.id)}
                           className="w-full text-xs px-2 py-[6px] rounded-full bg-amber-400/90 text-slate-950 font-semibold hover:bg-amber-300 transition-colors"
                           title="이 학생의 사유만 서버에 저장"
                         >
@@ -310,7 +412,10 @@ export default function DisplayPage(){
                   ))}
                   {students.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="py-8 text-center text-sm text-slate-500">
+                      <td
+                        colSpan={6}
+                        className="py-8 text-center text-sm text-slate-500"
+                      >
                         불러온 학생 데이터가 없습니다.
                       </td>
                     </tr>
@@ -322,9 +427,9 @@ export default function DisplayPage(){
         </div>
 
         {/* 오른쪽: 교실 + 요약 + 기타 */}
-        <div className="h-[1140] flex-1 flex flex-col gap-4">
-          <div className="flex gap-4 h-[32%] min-h-[320px]">
-            {/* 교실 */}
+        <div className="h-[1140px] flex-1 flex flex-col gap-4">
+          <div className="flex gap-4 h-[39%] min-h-[320px]">
+            {/* 교실 – ✅ 원래처럼 아이콘 절대좌표 레이아웃 */}
             <div className="relative flex flex-col w-[650px] max-w-[650px] bg-slate-900/70 border border-slate-700/70 rounded-2xl shadow-[0_0_40px_rgba(15,23,42,0.8)] overflow-hidden">
               <div className="flex items-center justify-between px-4 py-2 border-b border-slate-700/70 bg-slate-900/80">
                 <div className="text-sm font-semibold flex items-center gap-2">
@@ -339,14 +444,16 @@ export default function DisplayPage(){
                 </div>
               </div>
               <div className="relative flex-1 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.14),_transparent_60%),radial-gradient(circle_at_bottom,_rgba(16,185,129,0.18),_transparent_55%)]">
-                {classroomStudents.map(s=>{
-                  const pos = s.seatId ? SEAT_POS[s.seatId] : undefined;
-                  if(!pos) return null;
+                {classroomStudents.map((s) => {
+                  if (!s.seatId) return null;
+                  const pos = SEAT_POS[s.seatId];
+                  if (!pos) return null;
+
                   return (
                     <div
                       key={s.id}
                       className="absolute px-3 py-1.5 text-sm font-semibold rounded-xl bg-slate-900/90 border border-slate-600/80 shadow-[0_0_18px_rgba(15,23,42,0.9)] flex flex-col items-center min-w-[80px]"
-                      style={{ left: pos.x, top: pos.y+16 }}
+                      style={{ left: pos.x, top: pos.y + 16 }}
                     >
                       <span className="text-sm text-slate-200">{s.name}</span>
                       <span className="mt-0.5 text-[11px] px-2 py-[1px] rounded-full border border-slate-600/70 text-slate-300 bg-slate-950/80">
@@ -367,12 +474,12 @@ export default function DisplayPage(){
                     &lt;미디어스페이스&gt;
                   </div>
                   <div className="flex-1 p-2 space-y-2 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700/70 scrollbar-track-transparent">
-                    {mediaStudents.map((s,idx)=>(
+                    {mediaStudents.map((s, idx) => (
                       <div
                         key={s.id}
                         className="border border-sky-500/40 bg-sky-500/10 text-sm font-semibold text-sky-100 text-center py-1.5 rounded-xl shadow-[0_0_16px_rgba(56,189,248,0.5)]"
                       >
-                        {idx+1}. {s.name}
+                        {idx + 1}. {s.name}
                       </div>
                     ))}
                     {mediaStudents.length === 0 && (
@@ -389,10 +496,12 @@ export default function DisplayPage(){
                     &lt;귀가 / 외출 / 호실자습&gt;
                   </div>
                   <div className="flex-1 p-2 space-y-2 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700/70 scrollbar-track-transparent">
-                    {goneStudents.map(s=>(
+                    {goneStudents.map((s) => (
                       <div
                         key={s.id}
-                        className={`border text-sm text-center py-1.5 rounded-xl shadow-[0_0_16px_rgba(15,23,42,0.7)] ${statusColor(s.status)}`}
+                        className={`border text-sm text-center py-1.5 rounded-xl shadow-[0_0_16px_rgba(15,23,42,0.7)] ${statusColor(
+                          s.status
+                        )}`}
                       >
                         <div className="font-semibold">{s.name}</div>
                         <div className="text-[11px] opacity-80 mt-[1px]">
@@ -414,23 +523,33 @@ export default function DisplayPage(){
                 {/* 인원 (교실·미디어스페이스) */}
                 <div className="flex-1 bg-slate-900/70 border border-slate-700/70 rounded-2xl shadow-[0_0_28px_rgba(15,23,42,0.8)] px-4 py-3 flex flex-col">
                   <div className="flex items-center justify-between mb-3">
-                    <div className="text-sm font-semibold">인원 (교실·미디어스페이스)</div>
+                    <div className="text-sm font-semibold">
+                      인원 (교실·미디어스페이스)
+                    </div>
                     <span className="text-[11px] text-slate-500 uppercase tracking-[0.18em]">
                       CLASS & MEDIA
                     </span>
                   </div>
                   <div className="flex justify-between text-sm mb-2">
                     <span className="text-slate-400">총원</span>
-                    <span className="font-bold text-xl text-slate-100">{totalCount}</span>
+                    <span className="font-bold text-xl text-slate-100">
+                      {totalCount}
+                    </span>
                   </div>
-                  {/* ✅ 결원 먼저 */}
+                  {/* 결원 먼저 */}
                   <div className="flex justify-between text-sm mb-2">
                     <span className="text-slate-400">결원</span>
-                    <span className="font-bold text-xl text-rose-400">{outClassOrMedia}</span>
+                    <span className="font-bold text-xl text-rose-400">
+                      {outClassOrMedia}
+                    </span>
                   </div>
                   <div className="mt-auto flex justify-between text-sm pt-2 border-t border-slate-700/60">
-                    <span className="text-slate-400">재실/미디어스페이스</span>
-                    <span className="font-bold text-xl text-emerald-300">{inClassOrMedia}</span>
+                    <span className="text-slate-400">
+                      재실/미디어스페이스
+                    </span>
+                    <span className="font-bold text-xl text-emerald-300">
+                      {inClassOrMedia}
+                    </span>
                   </div>
                 </div>
 
@@ -444,16 +563,22 @@ export default function DisplayPage(){
                   </div>
                   <div className="flex justify-between text-sm mb-2">
                     <span className="text-slate-400">총원</span>
-                    <span className="font-bold text-xl text-slate-100">{totalCount}</span>
+                    <span className="font-bold text-xl text-slate-100">
+                      {totalCount}
+                    </span>
                   </div>
-                  {/* ✅ 결원 먼저 */}
+                  {/* 결원 먼저 */}
                   <div className="flex justify-between text-sm mb-2">
                     <span className="text-slate-400">결원</span>
-                    <span className="font-bold text-xl text-rose-400">{outCampus}</span>
+                    <span className="font-bold text-xl text-rose-400">
+                      {outCampus}
+                    </span>
                   </div>
                   <div className="mt-auto flex justify-between text-sm pt-2 border-t border-slate-700/60">
                     <span className="text-slate-400">교내에 있음</span>
-                    <span className="font-bold text-xl text-sky-300">{inCampus}</span>
+                    <span className="font-bold text-xl text-sky-300">
+                      {inCampus}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -472,11 +597,18 @@ export default function DisplayPage(){
               </span>
             </div>
             <div className="flex-1 overflow-y-auto px-4 py-3 scrollbar-thin scrollbar-thumb-slate-700/70 scrollbar-track-transparent">
-              <div className="grid gap-3" style={{ gridTemplateColumns:"repeat(auto-fit, minmax(190px, 1fr))" }}>
-                {Object.keys(etcByStatus).map(st=>(
+              <div
+                className="grid gap-3"
+                style={{
+                  gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+                }}
+              >
+                {Object.keys(etcByStatus).map((st) => (
                   <div
                     key={st}
-                    className={`rounded-xl border px-3 py-2 bg-slate-950/60 ${statusColor(st)}`}
+                    className={`rounded-xl border px-3 py-2 bg-slate-950/60 ${statusColor(
+                      st
+                    )}`}
                   >
                     <div className="text-xs font-semibold mb-1.5 flex items-center justify-between">
                       <span>{st}</span>
@@ -485,26 +617,36 @@ export default function DisplayPage(){
                       </span>
                     </div>
                     <div className="space-y-1.5">
-                      {etcByStatus[st].slice().sort((a,b)=>Number(a.id)-Number(b.id)).map(s=>(
-                        <div key={s.id} className="text-[13px] leading-tight">
-                          <div className="flex items-center justify_between">
-                            <span>{s.name}</span>
-                            <span className="text-[11px] text-slate-200/80 font-mono">
-                              {s.id}
-                            </span>
-                          </div>
-                          {s.reason && (
-                            <div className="text-[11px] text-slate-100/85 mt-[2px]">
-                              {s.reason}
+                      {etcByStatus[st]
+                        .slice()
+                        .sort((a, b) => Number(a.id) - Number(b.id))
+                        .map((s) => (
+                          <div
+                            key={s.id}
+                            className="text-[13px] leading-tight"
+                          >
+                            <div className="flex items-center justify_between">
+                              <span>{s.name}</span>
+                              <span className="text-[11px] text-slate-200/80 font-mono">
+                                {s.id}
+                              </span>
                             </div>
-                          )}
-                          <div className={`text-[11px] mt-[1px] ${
-                            s.approved ? "text-emerald-200" : "text-rose-200"
-                          }`}>
-                            {s.approved ? "허가됨" : "미허가"}
+                            {s.reason && (
+                              <div className="text-[11px] text-slate-100/85 mt-[2px]">
+                                {s.reason}
+                              </div>
+                            )}
+                            <div
+                              className={`text-[11px] mt-[1px] ${
+                                s.approved
+                                  ? "text-emerald-200"
+                                  : "text-rose-200"
+                              }`}
+                            >
+                              {s.approved ? "허가됨" : "미허가"}
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        ))}
                     </div>
                   </div>
                 ))}
@@ -516,7 +658,6 @@ export default function DisplayPage(){
               </div>
             </div>
           </div>
-
         </div>
       </div>
     </div>
