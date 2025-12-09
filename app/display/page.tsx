@@ -428,7 +428,7 @@ export default function DisplayPage() {
 
         {/* 오른쪽: 교실 + 요약 + 기타 */}
         <div className="h-[1140px] flex-1 flex flex-col gap-4">
-          <div className="flex gap-4 h-[39%] min-h-[320px]">
+          <div className="flex gap-4 h-[34%] min-h-[320px]">
             {/* 교실 – ✅ 원래처럼 아이콘 절대좌표 레이아웃 */}
             <div className="relative flex flex-col w-[650px] max-w-[650px] bg-slate-900/70 border border-slate-700/70 rounded-2xl shadow-[0_0_40px_rgba(15,23,42,0.8)] overflow-hidden">
               <div className="flex items-center justify-between px-4 py-2 border-b border-slate-700/70 bg-slate-900/80">
