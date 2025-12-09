@@ -66,17 +66,18 @@ const statusColor = (status: string) => {
   }
 };
 
-/** 자리 배치 레이아웃 (예시) */
+/** 자리 배치 레이아웃 (1~36) */
 const SEAT_LAYOUT: (number | null)[][] = [
-  [1, 2, 11, 12, 21, 22],
-  [3, 4, 13, 14, 23, 24],
-  [5, 6, 15, 16, 25, 26],
-  [7, 8, 17, 18, 27, 28],
-  [9, 10, 19, 20, 29, 30],
-  [31, 32, null, null, null, null],
+  [1, 2, 3, 4, 5, 6],
+  [7, 8, 9, 10, 11, 12],
+  [13, 14, 15, 16, 17, 18],
+  [19, 20, 21, 22, 23, 24],
+  [25, 26, 27, 28, 29, 30],
+  [31, 32, 33, 34, 35, 36],
 ];
 
-const ALL_SEATS = Array.from({ length: 32 }, (_, i) => String(i + 1));
+// ✅ 좌석 옵션 1~36
+const ALL_SEATS = Array.from({ length: 36 }, (_, i) => String(i + 1));
 
 export default function TeacherDesktop() {
   const router = useRouter();
@@ -403,12 +404,8 @@ export default function TeacherDesktop() {
         payload.push({ id: currentOccupant.id, seatId: null });
       }
 
-      // 선택한 학생이 다른 좌석에 앉아 있으면 그 좌석도 해제
-      if (selectedStudent.seatId && selectedStudent.seatId !== seatStr) {
-        payload.push({ id: selectedStudent.id, seatId: seatStr });
-      } else {
-        payload.push({ id: selectedStudent.id, seatId: seatStr });
-      }
+      // 선택한 학생은 이 좌석으로
+      payload.push({ id: selectedStudent.id, seatId: seatStr });
     }
 
     if (payload.length === 0) return;
@@ -432,6 +429,30 @@ export default function TeacherDesktop() {
       await refreshNow();
     }
     setSeatMsg("좌석이 변경되었습니다.");
+    setTimeout(() => setSeatMsg(""), 2000);
+  };
+
+  // ✅ 전체 자리 초기화
+  const resetAllSeats = async () => {
+    const payload = students
+      .filter((s) => s.seatId)
+      .map((s) => ({ id: s.id, seatId: null as string | null }));
+
+    // 아무도 안 앉아 있으면 패치 안 날려도 됨
+    if (payload.length === 0) {
+      setSeatMsg("이미 모든 자리가 비어 있습니다.");
+      setTimeout(() => setSeatMsg(""), 2000);
+      return;
+    }
+
+    // 낙관적 업데이트
+    setStudents((prev) =>
+      sortById(prev.map((s) => ({ ...s, seatId: null })))
+    );
+
+    await patch(payload);
+
+    setSeatMsg("전체 자리를 초기화했습니다.");
     setTimeout(() => setSeatMsg(""), 2000);
   };
 
@@ -524,8 +545,7 @@ export default function TeacherDesktop() {
                     onClick={() =>
                       (window.location.href = `/change-password?role=teacher&id=${encodeURIComponent(
                         userParam
-                      )}`)
-                    }
+                      )}`)}
                     className="text-[11px] text-sky-300 hover:text-sky-200"
                   >
                     비밀번호 변경
@@ -932,6 +952,12 @@ export default function TeacherDesktop() {
                     </option>
                   ))}
                 </select>
+                <button
+                  onClick={resetAllSeats}
+                  className="ml-2 px-3 py-1.5 rounded-lg text-[11px] bg-rose-500 text-slate-50 border border-rose-300 hover:bg-rose-400 transition"
+                >
+                  전체 자리 초기화
+                </button>
               </div>
             </div>
 
