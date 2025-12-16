@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useStudentsRealtime } from "@/app/lib/realtime-client";
 
 const STATUS_LIST = [
   "재실",
@@ -21,6 +22,7 @@ const STATUS_LIST = [
 ] as const;
 
 type Status = (typeof STATUS_LIST)[number];
+
 type Student = {
   id: string;
   name: string;
@@ -30,7 +32,7 @@ type Student = {
   seatId?: string | null;
 };
 
-// 자리 번호(1~32) 레이아웃 – 교사 페이지랑 동일하게
+// 자리 번호(1~36) 레이아웃 – 교사 페이지랑 동일하게
 const SEAT_LAYOUT: (number | null)[][] = [
   [1, 2, 3, 4, 5, 6],
   [7, 8, 9, 10, 11, 12],
@@ -44,7 +46,7 @@ const SEAT_LAYOUT: (number | null)[][] = [
 const COLUMN_X = [40, 140, 240, 340, 440, 540];
 const ROW_Y = [20, 90, 160, 230, 300, 370];
 
-// seatId("1"~"32") → 좌표 매핑
+// seatId("1"~"36") → 좌표 매핑
 const buildSeatPos = (): Record<string, { x: number; y: number }> => {
   const map: Record<string, { x: number; y: number }> = {};
   SEAT_LAYOUT.forEach((row, rIdx) => {
@@ -106,17 +108,18 @@ export default function DisplayPage() {
   const [toast, setToast] = useState("");
   const [isFullscreen, setIsFullscreen] = useState(false);
 
+  // 로컬 입력/변경 보호(서버 갱신이 바로 덮어쓰는거 방지)
   const editedRef = useRef<Record<string, number>>({});
 
   // 시계
   useEffect(() => {
     const tick = () => {
       const d = new Date();
-      const yyyy = d.getFullYear(),
-        mm = String(d.getMonth() + 1).padStart(2, "0"),
-        dd = String(d.getDate()).padStart(2, "0");
-      const hh = String(d.getHours()).padStart(2, "0"),
-        mi = String(d.getMinutes()).padStart(2, "0");
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const dd = String(d.getDate()).padStart(2, "0");
+      const hh = String(d.getHours()).padStart(2, "0");
+      const mi = String(d.getMinutes()).padStart(2, "0");
       setNow(`${yyyy}-${mm}-${dd} ${hh}:${mi}`);
     };
     tick();
@@ -127,9 +130,7 @@ export default function DisplayPage() {
   // 전체화면 상태 추적
   useEffect(() => {
     if (typeof document === "undefined") return;
-    const handler = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-    };
+    const handler = () => setIsFullscreen(!!document.fullscreenElement);
     document.addEventListener("fullscreenchange", handler);
     return () => document.removeEventListener("fullscreenchange", handler);
   }, []);
@@ -143,35 +144,44 @@ export default function DisplayPage() {
     }
   };
 
-  // 폴링 1초
-  useEffect(() => {
-    const load = async () => {
-      const res = await fetch("/api/students", { cache: "no-store" });
-      if (!res.ok) return;
-      const server: Student[] = await res.json();
-      const sortedServer = sortById(server);
-      const now = Date.now();
-      const edited = editedRef.current;
+  // ✅ 서버 갱신: "최근 로컬 편집(1초)"은 서버가 덮어쓰지 않게 보호
+  const load = async () => {
+    const res = await fetch("/api/students", { cache: "no-store" });
+    if (!res.ok) return;
 
-      setStudents((prev) => {
-        const prevMap = new Map(prev.map((s) => [s.id, s]));
-        return sortedServer.map((sv) => {
-          const t = edited[sv.id];
-          if (t && now - t < 1000) return prevMap.get(sv.id) ?? sv;
-          return sv;
-        });
+    const server: Student[] = await res.json();
+    const sortedServer = sortById(server);
+
+    const nowTs = Date.now();
+    const edited = editedRef.current;
+
+    setStudents((prev) => {
+      const prevMap = new Map(prev.map((s) => [s.id, s]));
+      return sortedServer.map((sv) => {
+        const t = edited[sv.id];
+        if (t && nowTs - t < 1000) return prevMap.get(sv.id) ?? sv;
+        return sv;
       });
-    };
+    });
+  };
+
+  // 최초 1회 로드
+  useEffect(() => {
     load();
-    const t = setInterval(load, 1000);
-    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ✅ 폴링 제거: Ably 이벤트 오면 그때만 load()
+  useStudentsRealtime(() => {
+    load();
+  });
 
   const patchStatus = async (id: string, status: Status) => {
     editedRef.current[id] = Date.now();
     setStudents((prev) =>
       sortById(prev.map((s) => (s.id === id ? { ...s, status } : s)))
     );
+
     await fetch("/api/students", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -183,16 +193,19 @@ export default function DisplayPage() {
   const saveReason = async (id: string) => {
     const stu = students.find((s) => s.id === id);
     if (!stu) return;
+
     const res = await fetch("/api/students", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       cache: "no-store",
       body: JSON.stringify({ id, reason: stu.reason }),
     });
+
     if (res.ok) {
       const data = await res.json().catch(() => null);
-      if (data && Array.isArray(data.students))
+      if (data && Array.isArray(data.students)) {
         setStudents(sortById(data.students));
+      }
       setToast(`${stu.name}(${stu.id}) 사유 저장 완료`);
     } else {
       setToast("사유 저장 실패");
@@ -206,15 +219,18 @@ export default function DisplayPage() {
       status: "재실",
       reason: "",
     }));
+
     setStudents((prev) =>
       sortById(prev.map((s) => ({ ...s, status: "재실", reason: "" })))
     );
+
     await fetch("/api/students", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       cache: "no-store",
       body: JSON.stringify(payload),
     });
+
     setToast("전체 재실로 변경되었습니다.");
     setTimeout(() => setToast(""), 2000);
   };
@@ -257,18 +273,14 @@ export default function DisplayPage() {
             1-11 출결 현황
           </h1>
           <p className="text-sm text-slate-400 mt-1">
-            실시간으로 교실·미디어스페이스·귀가/외출/호실자습 상태를
-            모니터링합니다.
+            실시간으로 교실·미디어스페이스·귀가/외출/호실자습 상태를 모니터링합니다.
           </p>
         </div>
-
         <div className="flex flex-col items-end gap-1">
           <span className="text-[11px] text-slate-400 uppercase tracking-[0.2em]">
             LAST UPDATE
           </span>
           <span className="text-sm font-mono text-slate-200">{now}</span>
-
-          {/* 전체화면 토글 버튼 */}
           <button
             onClick={toggleFullscreen}
             className="mt-2 text-[11px] px-3 py-1.5 rounded-full border border-slate-600 bg-slate-900/80 hover:bg-slate-800/90 transition font-semibold text-slate-200"
@@ -331,14 +343,13 @@ export default function DisplayPage() {
                     </th>
                   </tr>
                 </thead>
+
                 <tbody>
                   {students.map((s, idx) => (
                     <tr
                       key={s.id}
                       className={`border-b border-slate-800/60 ${
-                        idx % 2 === 0
-                          ? "bg-slate-900/40"
-                          : "bg-slate-900/25"
+                        idx % 2 === 0 ? "bg-slate-900/40" : "bg-slate-900/25"
                       } hover:bg-slate-800/50 transition-colors`}
                     >
                       <td className="px-3 py-1.5 font-mono text-[13px] text-slate-200">
@@ -350,19 +361,13 @@ export default function DisplayPage() {
                       <td className="px-2 py-1.5">
                         <select
                           value={s.status}
-                          onChange={(e) =>
-                            patchStatus(s.id, e.target.value as Status)
-                          }
+                          onChange={(e) => patchStatus(s.id, e.target.value as Status)}
                           className={`w-full text-xs px-2 py-[5px] rounded-full border bg-slate-900/80 outline-none focus:ring-1 focus:ring-sky-400/70 ${statusColor(
                             s.status
                           )}`}
                         >
                           {STATUS_LIST.map((st) => (
-                            <option
-                              key={st}
-                              value={st}
-                              className="bg-slate-900"
-                            >
+                            <option key={st} value={st} className="bg-slate-900">
                               {st}
                             </option>
                           ))}
@@ -410,6 +415,7 @@ export default function DisplayPage() {
                       </td>
                     </tr>
                   ))}
+
                   {students.length === 0 && (
                     <tr>
                       <td
@@ -429,7 +435,7 @@ export default function DisplayPage() {
         {/* 오른쪽: 교실 + 요약 + 기타 */}
         <div className="h-[1140px] flex-1 flex flex-col gap-4">
           <div className="flex gap-4 h-[34%] min-h-[320px]">
-            {/* 교실 – ✅ 원래처럼 아이콘 절대좌표 레이아웃 */}
+            {/* 교실 – 원래처럼 아이콘 절대좌표 레이아웃 */}
             <div className="relative flex flex-col w-[650px] max-w-[650px] bg-slate-900/70 border border-slate-700/70 rounded-2xl shadow-[0_0_40px_rgba(15,23,42,0.8)] overflow-hidden">
               <div className="flex items-center justify-between px-4 py-2 border-b border-slate-700/70 bg-slate-900/80">
                 <div className="text-sm font-semibold flex items-center gap-2">
@@ -443,12 +449,12 @@ export default function DisplayPage() {
                   </span>
                 </div>
               </div>
+
               <div className="relative flex-1 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.14),_transparent_60%),radial-gradient(circle_at_bottom,_rgba(16,185,129,0.18),_transparent_55%)]">
                 {classroomStudents.map((s) => {
                   if (!s.seatId) return null;
-                  const pos = SEAT_POS[s.seatId];
+                  const pos = SEAT_POS[String(s.seatId)];
                   if (!pos) return null;
-
                   return (
                     <div
                       key={s.id}
@@ -536,7 +542,6 @@ export default function DisplayPage() {
                       {totalCount}
                     </span>
                   </div>
-                  {/* 결원 먼저 */}
                   <div className="flex justify-between text-sm mb-2">
                     <span className="text-slate-400">결원</span>
                     <span className="font-bold text-xl text-rose-400">
@@ -544,9 +549,7 @@ export default function DisplayPage() {
                     </span>
                   </div>
                   <div className="mt-auto flex justify-between text-sm pt-2 border-t border-slate-700/60">
-                    <span className="text-slate-400">
-                      재실/미디어스페이스
-                    </span>
+                    <span className="text-slate-400">재실/미디어스페이스</span>
                     <span className="font-bold text-xl text-emerald-300">
                       {inClassOrMedia}
                     </span>
@@ -567,7 +570,6 @@ export default function DisplayPage() {
                       {totalCount}
                     </span>
                   </div>
-                  {/* 결원 먼저 */}
                   <div className="flex justify-between text-sm mb-2">
                     <span className="text-slate-400">결원</span>
                     <span className="font-bold text-xl text-rose-400">
@@ -592,16 +594,13 @@ export default function DisplayPage() {
                 <span className="w-1.5 h-4 bg-gradient-to-b from-sky-400 to-violet-500 rounded-full" />
                 &lt;기타&gt;
               </div>
-              <span className="text-xs text-slate-500">
-                화장실·상담·동아리실 등
-              </span>
+              <span className="text-xs text-slate-500">화장실·상담·동아리실 등</span>
             </div>
+
             <div className="flex-1 overflow-y-auto px-4 py-3 scrollbar-thin scrollbar-thumb-slate-700/70 scrollbar-track-transparent">
               <div
                 className="grid gap-3"
-                style={{
-                  gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
-                }}
+                style={{ gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))" }}
               >
                 {Object.keys(etcByStatus).map((st) => (
                   <div
@@ -616,31 +615,29 @@ export default function DisplayPage() {
                         {etcByStatus[st].length}명
                       </span>
                     </div>
+
                     <div className="space-y-1.5">
                       {etcByStatus[st]
                         .slice()
                         .sort((a, b) => Number(a.id) - Number(b.id))
                         .map((s) => (
-                          <div
-                            key={s.id}
-                            className="text-[13px] leading-tight"
-                          >
-                            <div className="flex items-center justify_between">
+                          <div key={s.id} className="text-[13px] leading-tight">
+                            <div className="flex items-center justify-between">
                               <span>{s.name}</span>
                               <span className="text-[11px] text-slate-200/80 font-mono">
                                 {s.id}
                               </span>
                             </div>
+
                             {s.reason && (
                               <div className="text-[11px] text-slate-100/85 mt-[2px]">
                                 {s.reason}
                               </div>
                             )}
+
                             <div
                               className={`text-[11px] mt-[1px] ${
-                                s.approved
-                                  ? "text-emerald-200"
-                                  : "text-rose-200"
+                                s.approved ? "text-emerald-200" : "text-rose-200"
                               }`}
                             >
                               {s.approved ? "허가됨" : "미허가"}
@@ -650,6 +647,7 @@ export default function DisplayPage() {
                     </div>
                   </div>
                 ))}
+
                 {Object.keys(etcByStatus).length === 0 && (
                   <div className="text-sm text-slate-500">
                     기타 상태에 해당하는 인원이 없습니다.

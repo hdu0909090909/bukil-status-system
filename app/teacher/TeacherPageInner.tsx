@@ -3,6 +3,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useStudentsRealtime } from "@/app/lib/realtime-client";
 
 const STATUS_LIST = [
   "재실",
@@ -23,7 +24,7 @@ const STATUS_LIST = [
 
 type Status = (typeof STATUS_LIST)[number];
 
-type Student = {
+export type Student = {
   id: string;
   name: string;
   status: string;
@@ -66,7 +67,7 @@ const statusColor = (status: string) => {
   }
 };
 
-/** 자리 배치 레이아웃 (1~36) */
+/** 자리 배치 레이아웃 */
 const SEAT_LAYOUT: (number | null)[][] = [
   [1, 2, 3, 4, 5, 6],
   [7, 8, 9, 10, 11, 12],
@@ -76,7 +77,6 @@ const SEAT_LAYOUT: (number | null)[][] = [
   [31, 32, 33, 34, 35, 36],
 ];
 
-// ✅ 좌석 옵션 1~36
 const ALL_SEATS = Array.from({ length: 36 }, (_, i) => String(i + 1));
 
 export default function TeacherDesktop() {
@@ -88,14 +88,14 @@ export default function TeacherDesktop() {
 
   const [tab, setTab] =
     useState<"status" | "schedule" | "manage" | "seat">("status");
+
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
 
-  // 사유 입력
+  // 사유 입력(로컬 draft)
   const [reasonDraft, setReasonDraft] = useState<Record<string, string>>({});
   const editingReason = useRef<Set<string>>(new Set());
-  const editedRef = useRef<Record<string, number>>({}); // 상태/허가 보호
 
   const [schedEnabled, setSchedEnabled] = useState<boolean>(true);
 
@@ -111,66 +111,65 @@ export default function TeacherDesktop() {
   const [seatSelectValue, setSeatSelectValue] = useState<string>("");
   const [seatMsg, setSeatMsg] = useState("");
 
-  // 첫 로드
+  // 서버 리스트를 로컬 typing 상태랑 섞어서 덮어쓰기
+  const applyServerStudents = (server: Student[]) => {
+    const sorted = sortById(server);
+    setStudents((prev) => {
+      const prevMap = new Map(prev.map((s) => [s.id, s]));
+      return sorted.map((sv) => {
+        const isTyping = editingReason.current.has(sv.id);
+        const localDraft = reasonDraft[sv.id];
+
+        if (isTyping) {
+          const local = prevMap.get(sv.id);
+          return {
+            ...sv,
+            reason: localDraft ?? local?.reason ?? sv.reason ?? "",
+          };
+        }
+        if (localDraft !== undefined) {
+          return { ...sv, reason: localDraft };
+        }
+        return sv;
+      });
+    });
+  };
+
+  const refreshNow = async () => {
+    const res = await fetch("/api/students", { cache: "no-store" });
+    if (!res.ok) return;
+    const data: Student[] = await res.json();
+    applyServerStudents(data);
+  };
+
+  // 최초 로드
   useEffect(() => {
     const load = async () => {
       const [res1, res2] = await Promise.all([
         fetch("/api/students", { cache: "no-store" }),
         fetch("/api/scheduler/state", { cache: "no-store" }).catch(() => null),
       ]);
-      const data: Student[] = await res1.json();
-      setStudents(sortById(data));
+
+      if (res1.ok) {
+        const data: Student[] = await res1.json();
+        applyServerStudents(data);
+      }
+
       if (res2 && res2.ok) {
         const j = await res2.json();
         if (typeof j.enabled === "boolean") setSchedEnabled(j.enabled);
       }
+
       setLoading(false);
     };
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 폴링 (상태 탭에서만)
-  useEffect(() => {
-    if (tab !== "status") return;
-
-    const tick = async () => {
-      const res = await fetch("/api/students", { cache: "no-store" });
-      if (!res.ok) return;
-      const server: Student[] = await res.json();
-      const sorted = sortById(server);
-      const now = Date.now();
-
-      setStudents((prev) => {
-        const prevMap = new Map(prev.map((s) => [s.id, s]));
-        return sorted.map((sv) => {
-          const wasEdited = editedRef.current[sv.id];
-          const keepLocal = wasEdited && now - wasEdited < 5000;
-
-          const localDraft = reasonDraft[sv.id];
-          const isTyping = editingReason.current.has(sv.id);
-          const reason =
-            isTyping || localDraft !== undefined
-              ? localDraft ?? ""
-              : sv.reason;
-
-          if (keepLocal) {
-            const local = prevMap.get(sv.id) ?? sv;
-            return {
-              ...sv,
-              reason,
-              status: local.status,
-              approved: local.approved,
-            };
-          }
-          return { ...sv, reason };
-        });
-      });
-    };
-
-    tick();
-    const t = setInterval(tick, 500);
-    return () => clearInterval(t);
-  }, [tab, reasonDraft]);
+  // ✅ 폴링 제거: Ably 이벤트 오면 그때만 갱신
+  useStudentsRealtime(() => {
+    refreshNow();
+  });
 
   // 공통 PATCH
   const patch = async (payload: any) => {
@@ -182,22 +181,15 @@ export default function TeacherDesktop() {
     });
   };
 
-  const refreshNow = async () => {
-    const res = await fetch("/api/students", { cache: "no-store" });
-    const data: Student[] = await res.json();
-    setStudents(sortById(data));
-  };
-
   // 상태/허가 저장
   const saveStudent = async (id: string, updates: Partial<Student>) => {
-    editedRef.current[id] = Date.now();
     setStudents((prev) =>
       sortById(prev.map((s) => (s.id === id ? { ...s, ...updates } : s)))
     );
     await patch({ id, ...updates });
   };
 
-  // 사유 저장
+  // 사유 저장(단건)
   const saveReason = async (s: Student) => {
     const draft = reasonDraft[s.id] ?? "";
     await patch({ id: s.id, reason: draft });
@@ -206,9 +198,8 @@ export default function TeacherDesktop() {
       const { [s.id]: _, ...rest } = m;
       return rest;
     });
-    setMessage(
-      `${s.name}(${s.id}) 사유가 "${draft || "-"}"로 저장되었습니다.`
-    );
+
+    setMessage(`${s.name}(${s.id}) 사유가 "${draft || "-"}"로 저장되었습니다.`);
     setTimeout(() => setMessage(""), 2500);
   };
 
@@ -251,9 +242,7 @@ export default function TeacherDesktop() {
 
   const approveAll = async () => {
     const payload = students.map((s) => ({ id: s.id, approved: true }));
-    setStudents((prev) =>
-      sortById(prev.map((s) => ({ ...s, approved: true })))
-    );
+    setStudents((prev) => sortById(prev.map((s) => ({ ...s, approved: true }))));
     await patch(payload);
   };
 
@@ -326,7 +315,7 @@ export default function TeacherDesktop() {
       status: "재실",
       reason: "",
       approved: true,
-      seatId: newSeat || undefined,
+      seatId: newSeat || null,
     };
 
     const res = await fetch("/api/students", {
@@ -342,11 +331,8 @@ export default function TeacherDesktop() {
       return;
     }
 
-    if (Array.isArray(data.students)) {
-      setStudents(sortById(data.students));
-    } else {
-      await refreshNow();
-    }
+    if (Array.isArray(data.students)) applyServerStudents(data.students);
+    else await refreshNow();
 
     setNewId("");
     setNewName("");
@@ -375,11 +361,9 @@ export default function TeacherDesktop() {
       return;
     }
 
-    if (Array.isArray(data.students)) {
-      setStudents(sortById(data.students));
-    } else {
-      await refreshNow();
-    }
+    if (Array.isArray(data.students)) applyServerStudents(data.students);
+    else await refreshNow();
+
     setSelectedStudentIds([]);
     setManageMsg("선택한 학생이 삭제되었습니다.");
   };
@@ -392,19 +376,16 @@ export default function TeacherDesktop() {
     const currentOccupant = students.find((s) => s.seatId === seatStr);
 
     if (!nextStudentId) {
-      // 비어 있음: 기존 있으면 해제
       if (!currentOccupant) return;
       payload.push({ id: currentOccupant.id, seatId: null });
     } else {
       const selectedStudent = students.find((s) => s.id === nextStudentId);
       if (!selectedStudent) return;
 
-      // 이 좌석 기존 주인 해제
       if (currentOccupant && currentOccupant.id !== nextStudentId) {
         payload.push({ id: currentOccupant.id, seatId: null });
       }
 
-      // 선택한 학생은 이 좌석으로
       payload.push({ id: selectedStudent.id, seatId: seatStr });
     }
 
@@ -423,35 +404,34 @@ export default function TeacherDesktop() {
       return;
     }
 
-    if (Array.isArray(data.students)) {
-      setStudents(sortById(data.students));
-    } else {
-      await refreshNow();
-    }
+    if (Array.isArray(data.students)) applyServerStudents(data.students);
+    else await refreshNow();
+
     setSeatMsg("좌석이 변경되었습니다.");
     setTimeout(() => setSeatMsg(""), 2000);
   };
 
-  // ✅ 전체 자리 초기화
+  // ✅ 자리 전체 초기화
   const resetAllSeats = async () => {
-    const payload = students
-      .filter((s) => s.seatId)
-      .map((s) => ({ id: s.id, seatId: null as string | null }));
+    const payload = students.map((s) => ({ id: s.id, seatId: null }));
+    const res = await fetch("/api/students", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => null);
 
-    // 아무도 안 앉아 있으면 패치 안 날려도 됨
-    if (payload.length === 0) {
-      setSeatMsg("이미 모든 자리가 비어 있습니다.");
-      setTimeout(() => setSeatMsg(""), 2000);
+    if (!res.ok || !data?.ok) {
+      setSeatMsg(data?.message || "전체 자리 초기화 실패");
       return;
     }
 
-    // 낙관적 업데이트
-    setStudents((prev) =>
-      sortById(prev.map((s) => ({ ...s, seatId: null })))
-    );
+    if (Array.isArray(data.students)) applyServerStudents(data.students);
+    else await refreshNow();
 
-    await patch(payload);
-
+    setSelectedSeat(null);
+    setSeatSelectValue("");
     setSeatMsg("전체 자리를 초기화했습니다.");
     setTimeout(() => setSeatMsg(""), 2000);
   };
@@ -545,7 +525,8 @@ export default function TeacherDesktop() {
                     onClick={() =>
                       (window.location.href = `/change-password?role=teacher&id=${encodeURIComponent(
                         userParam
-                      )}`)}
+                      )}`)
+                    }
                     className="text-[11px] text-sky-300 hover:text-sky-200"
                   >
                     비밀번호 변경
@@ -625,26 +606,21 @@ export default function TeacherDesktop() {
                         </td>
                       </tr>
                     ) : (
-                      students.map((s, idx) => {
+                      sortById(students).map((s, idx) => {
                         const draft = reasonDraft[s.id];
-                        const inputValue =
-                          draft !== undefined ? draft : s.reason;
+                        const inputValue = draft !== undefined ? draft : s.reason;
 
                         return (
                           <tr
                             key={s.id}
                             className={`border-b border-slate-800/70 ${
-                              idx % 2 === 0
-                                ? "bg-slate-900/50"
-                                : "bg-slate-900/30"
+                              idx % 2 === 0 ? "bg-slate-900/50" : "bg-slate-900/30"
                             } hover:bg-slate-800/60 transition-colors`}
                           >
                             <td className="px-3 py-1.5 text-xs font-mono text-slate-200">
                               {s.id}
                             </td>
-                            <td className="px-2 py-1.5 text-[13px]">
-                              {s.name}
-                            </td>
+                            <td className="px-2 py-1.5 text-[13px]">{s.name}</td>
                             <td className="px-2 py-1.5">
                               <div
                                 className={`w-full rounded-full border px-1 ${statusColor(
@@ -678,9 +654,7 @@ export default function TeacherDesktop() {
                                 onFocus={() => {
                                   editingReason.current.add(s.id);
                                   setReasonDraft((m) =>
-                                    m[s.id] === undefined
-                                      ? { ...m, [s.id]: s.reason }
-                                      : m
+                                    m[s.id] === undefined ? { ...m, [s.id]: s.reason } : m
                                   );
                                 }}
                                 onChange={(e) =>
@@ -706,11 +680,7 @@ export default function TeacherDesktop() {
                             </td>
                             <td className="px-2 py-1.5">
                               <button
-                                onClick={() =>
-                                  saveStudent(s.id, {
-                                    approved: !s.approved,
-                                  })
-                                }
+                                onClick={() => saveStudent(s.id, { approved: !s.approved })}
                                 className={`text-[11px] px-3 py-[6px] rounded-full w-full font-semibold border transition ${
                                   s.approved
                                     ? "bg-emerald-500/90 text-slate-950 border-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.7)] hover:bg-emerald-400"
@@ -738,17 +708,13 @@ export default function TeacherDesktop() {
                 </div>
                 <div className="flex justify-between text-xs items-center text-slate-300">
                   <span>총원</span>
-                  <span className="font-bold text-xl text-slate-50">
-                    {total}
-                  </span>
+                  <span className="font-bold text-xl text-slate-50">{total}</span>
                 </div>
                 <div className="flex justify-between text-xs items-center text-slate-300">
                   <span>결원</span>
                   <span
                     className={`font-bold text-xl ${
-                      outClassOrMedia === 0
-                        ? "text-slate-500"
-                        : "text-rose-400"
+                      outClassOrMedia === 0 ? "text-slate-500" : "text-rose-400"
                     }`}
                   >
                     {outClassOrMedia}
@@ -769,9 +735,7 @@ export default function TeacherDesktop() {
                 </div>
                 <div className="flex justify-between text-xs items-center text-slate-300">
                   <span>총원</span>
-                  <span className="font-bold text-xl text-slate-50">
-                    {total}
-                  </span>
+                  <span className="font-bold text-xl text-slate-50">{total}</span>
                 </div>
                 <div className="flex justify-between text-xs items-center text-slate-300">
                   <span>교내에 없음</span>
@@ -785,9 +749,7 @@ export default function TeacherDesktop() {
                 </div>
                 <div className="flex justify-between text-xs items-center text-slate-300 mt-1 pt-2 border-t border-slate-700/70">
                   <span>교내에 있음</span>
-                  <span className="font-bold text-xl text-sky-300">
-                    {inCampus}
-                  </span>
+                  <span className="font-bold text-xl text-sky-300">{inCampus}</span>
                 </div>
               </div>
             </div>
@@ -802,13 +764,12 @@ export default function TeacherDesktop() {
           <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-[0_0_30px_rgba(15,23,42,0.9)] flex flex-col gap-3">
             <div className="flex items-center justify-between mb-1">
               <div className="text-sm font-semibold">반 학생 목록</div>
-              <div className="text-[11px] text-slate-400">
-                총 {students.length}명
-              </div>
+              <div className="text-[11px] text-slate-400">총 {students.length}명</div>
             </div>
+
             <div className="border border-slate-800 rounded-xl overflow-y-auto max-h-[420px]">
               <table className="w-full text-[12px]">
-                <thead className="bg-slate-900/95 border-b border-slate-700">
+                <thead className="bg-slate-900/95 border-b border-slate-700 sticky top-0">
                   <tr>
                     <th className="px-2 py-2 w-10 text-center">선택</th>
                     <th className="px-2 py-2 w-24 text-left">학번</th>
@@ -819,10 +780,7 @@ export default function TeacherDesktop() {
                 <tbody>
                   {students.length === 0 ? (
                     <tr>
-                      <td
-                        colSpan={4}
-                        className="px-3 py-4 text-center text-slate-400"
-                      >
+                      <td colSpan={4} className="px-3 py-4 text-center text-slate-400">
                         등록된 학생이 없습니다.
                       </td>
                     </tr>
@@ -848,9 +806,7 @@ export default function TeacherDesktop() {
                             />
                           </td>
                           <td className="px-2 py-1.5 font-mono">{s.id}</td>
-                          <td className="px-2 py-1.5 text-[13px]">
-                            {s.name}
-                          </td>
+                          <td className="px-2 py-1.5 text-[13px]">{s.name}</td>
                           <td className="px-2 py-1.5">
                             {s.seatId ? `${s.seatId}번` : "미배정"}
                           </td>
@@ -901,9 +857,7 @@ export default function TeacherDesktop() {
               </div>
 
               <div className="flex items-center gap-2 pt-2">
-                <span className="text-slate-300">
-                  선택 학생: {selectedStudentIds.length}명
-                </span>
+                <span className="text-slate-300">선택 학생: {selectedStudentIds.length}명</span>
                 <button
                   onClick={handleDeleteSelected}
                   disabled={selectedStudentIds.length === 0}
@@ -912,14 +866,13 @@ export default function TeacherDesktop() {
                   선택 학생 삭제
                 </button>
               </div>
-              {manageMsg && (
-                <div className="text-[11px] text-slate-300">{manageMsg}</div>
-              )}
+
+              {manageMsg && <div className="text-[11px] text-slate-300">{manageMsg}</div>}
             </div>
           </div>
         )}
 
-        {/* 자리 배정 탭: 좌석 클릭 + 상단 드롭다운 */}
+        {/* 자리 배정 탭 */}
         {tab === "seat" && (
           <section className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-[0_0_30px_rgba(15,23,42,0.9)] flex flex-col gap-3">
             <div className="flex items-center justify-between mb-2">
@@ -929,35 +882,39 @@ export default function TeacherDesktop() {
                   자리를 클릭한 뒤 위 드롭다운에서 학생을 선택하세요.
                 </div>
               </div>
-              <div className="flex items-center gap-2 text-[11px]">
-                <span className="text-slate-300">
-                  선택한 자리:{" "}
-                  {selectedSeat ? `${selectedSeat}번` : "없음"}
-                </span>
-                <select
-                  disabled={!selectedSeat}
-                  value={seatSelectValue}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setSeatSelectValue(v);
-                    if (!selectedSeat) return;
-                    handleSeatSelectChange(selectedSeat, v);
-                  }}
-                  className="border border-slate-700 rounded-lg px-2 py-1 bg-slate-950/80 text-[12px] disabled:opacity-40"
-                >
-                  <option value="">비어 있음</option>
-                  {sortById(students).map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.id} {s.name}
-                    </option>
-                  ))}
-                </select>
+
+              <div className="flex items-center gap-2">
                 <button
                   onClick={resetAllSeats}
-                  className="ml-2 px-3 py-1.5 rounded-lg text-[11px] bg-rose-500 text-slate-50 border border-rose-300 hover:bg-rose-400 transition"
+                  className="px-3 py-1.5 text-[11px] rounded-full bg-rose-500 text-slate-50 font-semibold border border-rose-300 hover:bg-rose-400 transition"
+                  title="모든 학생의 seatId를 null로 초기화"
                 >
                   전체 자리 초기화
                 </button>
+
+                <div className="flex items-center gap-2 text-[11px]">
+                  <span className="text-slate-300">
+                    선택한 자리: {selectedSeat ? `${selectedSeat}번` : "없음"}
+                  </span>
+                  <select
+                    disabled={!selectedSeat}
+                    value={seatSelectValue}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setSeatSelectValue(v);
+                      if (!selectedSeat) return;
+                      handleSeatSelectChange(selectedSeat, v);
+                    }}
+                    className="border border-slate-700 rounded-lg px-2 py-1 bg-slate-950/80 text-[12px] disabled:opacity-40"
+                  >
+                    <option value="">비어 있음</option>
+                    {sortById(students).map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.id} {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
             </div>
 
@@ -985,9 +942,7 @@ export default function TeacherDesktop() {
                         }`}
                       >
                         <div className="flex items-center justify-between">
-                          <span className="font-mono text-slate-300">
-                            {seat}번
-                          </span>
+                          <span className="font-mono text-slate-300">{seat}번</span>
                           <span className="text-[10px] text-slate-500">
                             {owner ? owner.id : "비어 있음"}
                           </span>
@@ -1001,9 +956,8 @@ export default function TeacherDesktop() {
                 </div>
               ))}
             </div>
-            {seatMsg && (
-              <p className="text-[11px] text-slate-300 mt-2">{seatMsg}</p>
-            )}
+
+            {seatMsg && <p className="text-[11px] text-slate-300 mt-2">{seatMsg}</p>}
           </section>
         )}
       </div>
@@ -1038,9 +992,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
             reason: string;
           }>) ?? [];
         if (items.length > 0) {
-          setRows(
-            items.sort((a, b) => Number(a.studentId) - Number(b.studentId))
-          );
+          setRows(items.sort((a, b) => Number(a.studentId) - Number(b.studentId)));
           setLoading(false);
           return;
         }
@@ -1069,9 +1021,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
   }, [day, slot]);
 
   const setAllNoChange = () =>
-    setRows((prev) =>
-      prev.map((r) => ({ ...r, status: "변경안함", reason: "" }))
-    );
+    setRows((prev) => prev.map((r) => ({ ...r, status: "변경안함", reason: "" })));
 
   const fillFromCurrent = async () => {
     const res = await fetch("/api/students", { cache: "no-store" });
@@ -1117,9 +1067,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
     part: Partial<{ status: string; reason: string }>
   ) => {
     setRows((prev) =>
-      prev.map((r) =>
-        r.studentId === studentId ? { ...r, ...part } : r
-      )
+      prev.map((r) => (r.studentId === studentId ? { ...r, ...part } : r))
     );
   };
 
@@ -1205,19 +1153,13 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
           <tbody>
             {loading ? (
               <tr>
-                <td
-                  colSpan={4}
-                  className="px-3 py-6 text-center text-sm text-slate-400"
-                >
+                <td colSpan={4} className="px-3 py-6 text-center text-sm text-slate-400">
                   불러오는 중...
                 </td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td
-                  colSpan={4}
-                  className="px-3 py-6 text-center text-sm text-slate-400"
-                >
+                <td colSpan={4} className="px-3 py-6 text-center text-sm text-slate-400">
                   이 시간에 저장된 스케줄이 없습니다.
                 </td>
               </tr>
@@ -1232,30 +1174,17 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
                   </td>
                   <td className="px-2 py-1.5 text-sm">{r.name}</td>
                   <td className="px-2 py-1.5">
-                    <div
-                      className={`w-full rounded-full border px-1 ${statusColor(
-                        r.status
-                      )}`}
-                    >
+                    <div className={`w-full rounded-full border px-1 ${statusColor(r.status)}`}>
                       <select
                         value={r.status}
-                        onChange={(e) =>
-                          updateRow(r.studentId, { status: e.target.value })
-                        }
+                        onChange={(e) => updateRow(r.studentId, { status: e.target.value })}
                         className="w-full bg-transparent border-none outline-none text-xs py-[6px] px-1 pr-5 appearance-none"
                       >
-                        <option
-                          value="변경안함"
-                          className="bg-slate-900 text-slate-100"
-                        >
+                        <option value="변경안함" className="bg-slate-900 text-slate-100">
                           변경안함
                         </option>
                         {STATUS_LIST.map((st) => (
-                          <option
-                            key={st}
-                            value={st}
-                            className="bg-slate-900 text-slate-100"
-                          >
+                          <option key={st} value={st} className="bg-slate-900 text-slate-100">
                             {st}
                           </option>
                         ))}
@@ -1265,9 +1194,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
                   <td className="px-2 py-1.5">
                     <input
                       value={r.reason}
-                      onChange={(e) =>
-                        updateRow(r.studentId, { reason: e.target.value })
-                      }
+                      onChange={(e) => updateRow(r.studentId, { reason: e.target.value })}
                       className="border border-slate-700/70 rounded-full px-2 py-[6px] text-xs w-full bg-slate-950/70 text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-400/70"
                       placeholder="사유"
                     />
@@ -1278,6 +1205,7 @@ function SchedulerTab({ onApplied }: { onApplied?: () => void }) {
           </tbody>
         </table>
       </div>
+
       <p className="text-[11px] text-slate-500 mt-1">
         ※ “변경안함”은 적용 시 실제 상태를 바꾸지 않습니다.
       </p>
