@@ -88,7 +88,15 @@ export async function GET() {
   }
 
 
-  const locked = await redis.set(key, true, { nx: true, ex: 60 * 60 * 24 });
+  const locked = await redis.setNxEx(key, "1", 60 * 60 * 24);
+if (locked !== "OK") {
+  return NextResponse.json({
+    ok: true,
+    skipped: true,
+    reason: "already-applied",
+  });
+}
+
 if (!locked) {
   return NextResponse.json({ ok: true, skipped: true, reason: "already-applied" });
 }

@@ -1,3 +1,4 @@
+// app/lib/redis.ts
 import { Redis } from "@upstash/redis";
 
 const client = new Redis({
@@ -26,7 +27,19 @@ export const redis = {
 
   async mset<T = unknown>(pairs: Record<string, T>): Promise<"OK"> {
     const entries = Object.entries(pairs);
-    await Promise.all(entries.map(([key, value]) => client.set(key, value)));
+    await Promise.all(entries.map(([k, v]) => client.set(k, v)));
     return "OK";
+  },
+
+  // ✅ 추가: 락용 (NX + EX)
+  async setNxEx(
+    key: string,
+    value: string,
+    exSeconds: number
+  ): Promise<"OK" | null> {
+    // Upstash Redis는 set에 옵션 객체를 받음
+    return (await client.set(key, value, { nx: true, ex: exSeconds })) as
+      | "OK"
+      | null;
   },
 };
