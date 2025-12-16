@@ -54,6 +54,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, message: "알 수 없는 role입니다." }, { status: 400 });
   } catch (err) {
     console.error("[change-password] error:", err);
-    return NextResponse.json({ ok: false, message: "서버 내부 오류" }, { status: 500 });
+    return NextResponse.json({ ok: false, message: "서버 내부 Error" }, { status: 500 });
   }
 }
