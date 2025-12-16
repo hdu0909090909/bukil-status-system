@@ -5,14 +5,12 @@ const client = new Redis({
   token: process.env.UPSTASH_REDIS_REST_TOKEN!,
 });
 
-type Json = any;
-
 export const redis = {
-  async get(key: string): Promise<Json | null> {
-    return await client.get(key);
+  async get<T = unknown>(key: string): Promise<T | null> {
+    return (await client.get(key)) as T | null;
   },
 
-  async set(key: string, value: Json): Promise<"OK"> {
+  async set<T = unknown>(key: string, value: T): Promise<"OK"> {
     await client.set(key, value);
     return "OK";
   },
@@ -22,12 +20,11 @@ export const redis = {
     return 1;
   },
 
-  async mget(keys: string[]): Promise<(Json | null)[]> {
-    return await client.mget(...keys);
+  async mget<T = unknown>(keys: string[]): Promise<(T | null)[]> {
+    return (await client.mget(...keys)) as (T | null)[];
   },
 
-  // 🔥 여기만 이렇게 고쳐 쓰면 됨
-  async mset(pairs: Record<string, Json>): Promise<"OK"> {
+  async mset<T = unknown>(pairs: Record<string, T>): Promise<"OK"> {
     const entries = Object.entries(pairs);
     await Promise.all(entries.map(([key, value]) => client.set(key, value)));
     return "OK";
