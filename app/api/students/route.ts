@@ -68,7 +68,7 @@ export async function PATCH(req: NextRequest) {
 
     const students = await readStudents();
 
-    // 1) 배치 PATCH (배열)
+    // 1) 배치 PATCH 
     if (Array.isArray(payload)) {
       const map = new Map(students.map((s) => [s.id, s] as const));
 
