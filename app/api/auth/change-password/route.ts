@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
       const list = ((await redis.get(STUDENTS_KEY)) as any[]) ?? [];
       const idx = list.findIndex((s) => s.id === id);
       if (idx === -1) {
-        return NextResponse.json({ ok: false, message: "학생을 찾을 수 없습니다." }, { status: 404 });
+        return NextResponse.json({ ok: false, message: "해당 학생을 찾을 수 없습니다." }, { status: 404 });
       }
       const currentPw = list[idx].password ?? "12345678";
       if (oldPassword && oldPassword !== currentPw) {
