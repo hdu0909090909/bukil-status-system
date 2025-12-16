@@ -73,7 +73,7 @@ export async function PATCH(req: NextRequest) {
       const map = new Map(students.map((s) => [s.id, s] as const));
 
       for (const item of payload) {
-        const id = String(item.id ?? "");
+        const id = String(item.id ?? "");//df
         if (!id) continue;
         const cur = map.get(id);
         if (!cur) continue;
@@ -89,7 +89,7 @@ export async function PATCH(req: NextRequest) {
       await writeStudents(next);
 
       // ✅ 성공 후 publish
-      await publishStudentsChanged();
+      await publishStudentsChanged();//gㅏㅇㅎ아ㅏㅎ어나
 
       return NextResponse.json({ ok: true, students: next });
     }
